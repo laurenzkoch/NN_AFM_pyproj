@@ -90,6 +90,7 @@ class FIRSTREGRESSION:
     def plot_prediction(self) -> None:
 
         colors = ["red", "green", "orange", "purple"]
+        units = ["A", "rad"]
         for color_index, (index, model_values) in enumerate(self.prediction.iterrows()):
             for colum in range(len(self.data.columns) - 1):
                 fig = plt.figure()
@@ -109,9 +110,9 @@ class FIRSTREGRESSION:
                     label=model_values["Model"]
                 )
 
-                ax.set_xlabel(self.data.columns[colum])
-                ax.set_ylabel("Shaft Torque")
-                ax.set_title(f"Linear Regression Prediction vs Actual - {self.data.columns[colum]}")
+                ax.set_xlabel(f"{self.data.columns[colum]} [{units[colum]}]")
+                ax.set_ylabel("Shaft Torque [Nm]")
+                ax.set_title(f"Linear Regression Prediction vs Actual Shaft Torque")
                 ax.legend(
                     loc="upper left",
                     bbox_to_anchor=(0.02, 0.98),
