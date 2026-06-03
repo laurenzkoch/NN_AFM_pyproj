@@ -51,19 +51,12 @@ class MCAD:
             raise FileNotFoundError(f"file not found: {file_path}")
         self.mcad.load_from_file(str(file_path))
 
-    def set_peak_current(self, peak_current_ampere: float) -> None:
-        self.mcad.set_variable("PeakCurrent", peak_current_ampere)
-
-    def set_phase_advance(self, phase_advance_degree: float) -> None:
-        self.mcad.set_variable("PhaseAdvance", phase_advance_degree)
-
-    def do_calculation(self) -> None:
-        self.mcad.do_magnetic_calculation()
 
     def export_results(self, suffix: str) -> None:
         filename = f"EMagnetic_{suffix}.csv"
         path_results = str(self.PATH_RESULTS / filename)
         self.mcad.export_results("EMagnetic", path_results)
+
 
     def get_torque(self) -> float:
         try:
@@ -71,6 +64,7 @@ class MCAD:
             return shaft_torque
         except ValueError:
             raise ValueError("Failed to convert ShaftTorque to float")
+
 
     def generate_data_set_shaft_torque(self, parameter_dict: dict[str, list[int]]) -> pd.DataFrame:
 
@@ -82,7 +76,7 @@ class MCAD:
         for combination in product(*parameter_dict.values()):
             for parameter_name, value in zip(parameter_dict.keys(), combination):
                 self.mcad.set_variable(parameter_name, value)
-            self.do_calculation()
+            self.mcad.do_magnetic_calculation()
             row = {
                 **dict(zip(parameter_dict.keys(), combination)),
                 "ShaftTorque": self.get_torque(),
@@ -92,11 +86,13 @@ class MCAD:
 
         return torque_results_df
 
+
     def export_data_set_shaft_torque(self, torque_results_df: pd.DataFrame) -> None:
         filename = f"torque_results_variation.csv"
         path_results = str(self.PATH_RESULTS / filename)
         torque_results_df.to_csv(path_results, index=False, sep=";", decimal=",", float_format="%.4f", encoding="utf-8")
         os.startfile(path_results)
+
 
     def create_plot(self, torque_results_df: pd.DataFrame) -> None:
 

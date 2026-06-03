@@ -4,7 +4,7 @@ def main() -> None:
     with MCAD() as mcad:
         mcad.open_motorcad_file("base_first_data.mot")
 
-        current = [i for i in range(1, 100, 1)]
+        current = [i for i in range(1, 100, 5)]
         phase_advance = [i for i in range(0, 90, 1)]
 
         parameters = {"PeakCurrent": current, "PhaseAdvance": phase_advance}
