@@ -2,7 +2,6 @@ import subprocess
 from pathlib import Path
 import time
 
-from matplotlib import figure
 from matplotlib.figure import Figure
 
 
