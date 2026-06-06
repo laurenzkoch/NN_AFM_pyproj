@@ -10,8 +10,8 @@ class MLModelTrainer:
         pass
 
 
+    @staticmethod
     def train_model(
-            self,
             x: pd.DataFrame,
             y: pd.DataFrame,
             test_split: float,
@@ -23,24 +23,25 @@ class MLModelTrainer:
 
         return model, x_test, y_test
 
-
+    @staticmethod
     def evaluate_model(
-            self,
             model: Any,
             x_test: pd.DataFrame,
             y_test: pd.DataFrame
-    ) -> dict[str, Any]:
+    ) -> pd.DataFrame:
 
         y_pred = model.predict(x_test)
         r2 = r2_score(y_test, y_pred)
         mean_squared_error_value = cast(float, mean_squared_error(y_test, y_pred))
 
-        evaluation_results = {
-            "Model": model.__class__.__name__,
-            "R^2 Score": r2,
-            "Mean Squared Error": mean_squared_error_value,
-            "y_pred": y_pred,
-            "x_test": x_test
-        }
+        trained_and_evaluated_model = pd.DataFrame([
+            {
+                "Model": model.__class__.__name__,
+                "R^2 Score": r2,
+                "Mean Squared Error": mean_squared_error_value,
+                "y_pred": y_pred,
+                "x_test": x_test
+             }
+        ])
 
-        return evaluation_results
+        return trained_and_evaluated_model
