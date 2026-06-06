@@ -80,6 +80,6 @@ def stop_process(process):
         process.wait()
 
 def save_plot(fig: Figure, filename: str):
-    path_plots = Path(__file__).resolve().parent.parent / "plots"
+    path_plots = Path(__file__).resolve().parent.parent / "plots" / "first_reg"
     path_plots.mkdir(exist_ok=True)
     fig.savefig(path_plots / filename)
