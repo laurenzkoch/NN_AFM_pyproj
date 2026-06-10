@@ -56,13 +56,50 @@ class SECONDREGRESSION(ml_model_trainig.MLModelTrainer, data_managing.DataManage
             ylabel="Phase Advance [Degrees]",
             zlabel="Shaft Torque [Nm]"
         )
-        for split in [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
+
+        train_models_splits = []
+        splits = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        for split in splits:
             train_models_df = self.train_models(test_split=split, x=x, y=y, models=models)
+            train_models_splits.append(train_models_df)
+
+
+        fig, ax = self.Plotter.create_fig_matplotlib(xlabel="Test Split", ylabel="R^2 Score", title="R^2 Score")
+        color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        for model in range(len(models)):
+            model_name = train_models_splits[0].iloc[model]["Model"]
+            ax = self.Plotter.add_data_to_plot(ax, splits, [train_models_splits[i].iloc[model]["R^2 Score"] for i in range(len(splits))], colors=color_cycle[model], marker="o", label=model_name)
+        ax.legend(
+            loc="lower left",
+            bbox_to_anchor=(0.02, 0.02),
+            borderaxespad=0.0
+        )
+        filename = f"plot_R2_over_Split.png"
+        self.Plotter.save_plot(fig, path_plots=self.path_plots, filename=filename)
+
+        fig, ax = self.Plotter.create_fig_matplotlib(xlabel="Test Split", ylabel="MSE", title="MSE")
+        color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        for model in range(len(models)):
+            model_name = train_models_splits[0].iloc[model]["Model"]
+            ax = self.Plotter.add_data_to_plot(
+                ax,
+                splits,
+                [train_models_splits[i].iloc[model]["Mean Squared Error"] for i in range(len(splits))],
+                colors=color_cycle[model],
+                marker="o",
+                label=model_name
+            )
+
+        ax.legend(
+            loc="upper left",
+            bbox_to_anchor=(0.02, 0.98),
+            borderaxespad=0.0
+        )
+        filename = f"plot_MSE_over_Split.png"
+        self.Plotter.save_plot(fig, path_plots=self.path_plots, filename=filename)
 
 
     def train_models(self, test_split, x, y, models: list[Any]) -> pd.DataFrame:
-
-        splits = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 
         prediction_df = pd.DataFrame(
             columns=[
@@ -91,7 +128,7 @@ class SECONDREGRESSION(ml_model_trainig.MLModelTrainer, data_managing.DataManage
                     bbox_to_anchor=(0.02, 0.98),
                     borderaxespad=0.0
                 )
-                plt.show()
+                plt.close()
 
                 filename = f"plot_shafttorque_predicted_over_{column}_{model.__class__.__name__}_{test_split:.2f}.png"
                 self.Plotter.save_plot(fig, path_plots=self.path_plots, filename=filename)
