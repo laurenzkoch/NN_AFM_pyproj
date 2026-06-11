@@ -18,7 +18,16 @@ class MLModelTrainer:
             model: Any
     ) -> tuple[Any, pd.DataFrame, pd.DataFrame]:
 
-        x_train, x_test, y_train, y_test = train_test_split(x, y.iloc[:,0], test_size=test_split, random_state=42)
+        x = x.sample(frac=1, random_state=42).reset_index(drop=True)
+        y = y.sample(frac=1, random_state=42).reset_index(drop=True)
+        
+        x_train, x_test, y_train, y_test = train_test_split(
+            x,
+            y.iloc[:,0],
+            test_size=test_split,
+            random_state=42,
+            shuffle=True
+        )
         model.fit(x_train, y_train)
 
         return model, x_test, y_test

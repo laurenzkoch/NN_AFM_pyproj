@@ -6,7 +6,8 @@ import matplotlib.pyplot as plt
 
 import ansys.motorcad.core as pymotorcad
 
-import utils
+from Archiv.src import utils
+
 
 class MCAD:
 

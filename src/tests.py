@@ -20,8 +20,9 @@ warnings.filterwarnings(
     module="ansys.motorcad.core.*"
 )
 
-from create_first_data import MCAD
-import utils
+from Archiv.src.create_first_data import MCAD
+from Archiv.src import utils
+
 
 class MyTestCase(unittest.TestCase):
 
