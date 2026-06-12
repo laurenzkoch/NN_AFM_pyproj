@@ -3,7 +3,7 @@ from typing import Any
 import plotly.express as px
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
-from pandas import DataFrame
+import config.config_paths
 import pandas as pd
 from pathlib import Path
 from matplotlib.figure import Figure

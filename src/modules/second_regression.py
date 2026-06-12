@@ -21,7 +21,7 @@ from sklearn.ensemble import (
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.neural_network import MLPRegressor
 
-from src import ml_model_trainig, data_managing, plotting
+from src.modules import plotting, ml_model_trainig, data_managing
 
 
 class SECONDREGRESSION(ml_model_trainig.MLModelTrainer, data_managing.DataManager):
