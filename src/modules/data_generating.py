@@ -86,31 +86,31 @@ class MCADDataGenerator:
         return combination_tuple[variable_index]
 
 
-    def test_boundary_conditions(self, combination_values: tuple) -> bool:
-        test_passed = True
+    def test_boundary_conditions(self) -> bool:
 
-        if ("Slot_Depth" in self.input_value_array_df["name"]
-                and "Stator_Lam_Length" in self.input_value_array_df["name"]):
-            if self.get_combination_value(variable_name="Slot_Depth", combination_tuple=combination_values) >= self.get_combination_value(variable_name="Stator_Lam_Length", combination_tuple=combination_values):
-                test_passed = False
-        if ("Motor_Length" in self.input_value_array_df["name"]
-                and "Stator_Lam_Length" in self.input_value_array_df["name"]):
-            if self.get_combination_value(variable_name="Motor_Length", combination_tuple=combination_values) <= self.get_combination_value(variable_name="Stator_Lam_Length", combination_tuple=combination_values):
-                test_passed = False
-        if ("Magnet_Length" in self.input_value_array_df["name"]
-                and "Airgap" in self.input_value_array_df["name"]):
-            if self.get_combination_value(variable_name="Magnet_Length", combination_tuple=combination_values) <= self.get_combination_value(variable_name="Airgap", combination_tuple=combination_values):
-                test_passed = False
-        if ("Magnet_Length" in self.input_value_array_df["name"]
-                and "Stator_Lam_Length" in self.input_value_array_df["name"]):
-            if self.get_combination_value(variable_name="Magnet_Length", combination_tuple=combination_values) >= self.get_combination_value(variable_name="Stator_Lam_Length", combination_tuple=combination_values):
-                test_passed = False
-        if ("Stator_Bore" in self.input_value_array_df["name"]
-                and "Stator_Lam_Dia" in self.input_value_array_df["name"]):
-            if self.get_combination_value(variable_name="Stator_Bore", combination_tuple=combination_values) >= self.get_combination_value(variable_name="Stator_Lam_Dia", combination_tuple=combination_values):
-                test_passed = False
+        if float(self.mCAD_process.get_variable("Slot_Depth")) >= float(self.mCAD_process.get_variable("Stator_Lam_Length")):
+             #print("test_boundary_conditions: Slot_Depth >= Stator_Lam_Length")
+             return False
+        if float(self.mCAD_process.get_variable("Motor_Length")) <= float(self.mCAD_process.get_variable("Stator_Lam_Length")):
+             #print("test_boundary_conditions: Motor_Length <= Stator_Lam_Length")
+             return False
+        if float(self.mCAD_process.get_variable("Magnet_Length")) <= float(self.mCAD_process.get_variable("Airgap")):
+             #print("test_boundary_conditions: Magnet_Length <= Airgap")
+             return False
+        if float(self.mCAD_process.get_variable("Magnet_Length")) >= float(self.mCAD_process.get_variable("Stator_Lam_Length")):
+             #print("test_boundary_conditions: Magnet_Length >= Stator_Lam_Length")
+             return False
+        if float(self.mCAD_process.get_variable("Stator_Bore")) >= float(self.mCAD_process.get_variable("Stator_Lam_Dia")):
+             #print("test_boundary_conditions: Stator_Bore >= Stator_Lam_Dia")
+             return False
+        if float(self.mCAD_process.get_variable("Stator_Bore")) <= float(self.mCAD_process.get_variable("Shaft_Dia")):
+             #print("test_boundary_conditions: Stator_Bore <= Shaft_Dia")
+             return False
+        if float(self.mCAD_process.get_variable("AFM_D_Rotor")) <= float(self.mCAD_process.get_variable("Stator_Bore")):
+             #print("test_boundary_conditions: AFM_D_Rotor <= Stator_Bore")
+             return False
 
-        return test_passed
+        return True
 
 
     @staticmethod
@@ -122,18 +122,42 @@ class MCADDataGenerator:
 
             elapsedtime = time.time() - starttime
             remainingtime = (elapsedtime / progress_step * (number_of_total_progress_steps - progress_step))
-            hours = int(remainingtime // 3600)
-            minutes = int((remainingtime % 3600) // 60)
-            seconds = remainingtime % 60
+            days, remainder = divmod(remainingtime, 24 * 3600)
+            hours, remainder = divmod(remainder, 3600)
+            minutes, seconds = divmod(remainder, 60)
 
-            if progress_percent_new >= progress_percent + 10 or progress_percent_new == 0:
-                print(f"{progress_percent_new:.1f}% done. Remaining time: {hours}h {minutes}min {seconds:.2f}ss")
+            if progress_percent_new >= progress_percent + 0 or progress_percent_new == 0:
+                print(f"{progress_percent_new:.1f}% done. Remaining time: {int(days)}d {int(hours)}h {int(minutes)}min {seconds:.2f}ss")
             return progress_percent_new
 
         return inner_track_progress
 
 
-    def placeholdername(self, output_parameters: list, running_number: int = 1) -> Path:
+    def do_calculation_and_get_values(self, path_results: Path, output_parameters: list[str]) -> bool:
+        value_row = []
+
+        if self.test_boundary_conditions():
+            try:
+                self.mCAD_process.do_magnetic_calculation()
+            except Exception as exc:
+                raise ValueError(f"Failed to execute MCAD calculation.") from exc
+
+            for variable in [str(self.input_value_array_df["name"].tolist() + output_parameters)]:
+                try:
+                    value_row.append(float(self.mCAD_process.get_variable(variable)))
+                except Exception as exc:
+                    raise ValueError(f"Failed to get variable {variable} from MCAD simulation.") from exc
+
+            with open(path_results, mode="a", newline="", encoding="utf-8") as file:
+                writer = csv.writer(file, delimiter=";", quotechar='"')
+                writer.writerow(value_row)
+            return True
+        else:
+            return False
+
+
+
+    def placeholdername(self, output_parameters: list[str], running_number: int = 1) -> Path:
 
         filename = f"Results_EMagnetic_simulation_{running_number}.csv"
         path_results = self.PATH_RESULTS / filename
@@ -151,7 +175,6 @@ class MCADDataGenerator:
             writer = csv.writer(file, delimiter=";", quotechar='"')
             writer.writerow(self.input_value_array_df["name"].tolist() + output_parameters)
 
-
         drop_counter = 0
         comb_counter = 0
         progress_in_percent = 0.0
@@ -164,32 +187,16 @@ class MCADDataGenerator:
                 raise OverflowError("Warning: The number of value combinations is too large."
                                     " Reducing the step sizes, intervall size or number of parameters.")
 
-            if self.test_boundary_conditions(combination):
-                value_row = []
-
-                for variable in self.input_value_array_df["name"]:
-                    value = self.get_combination_value(variable_name=variable, combination_tuple=combination)
-                    value_row.append(value)
-                    try:
-                        self.mCAD_process.set_variable(variable, value)
-                    except Exception as exc:
-                        raise ValueError(f"Failed to set variable {variable} to value {value}.") from exc
+            for variable in self.input_value_array_df["name"]:
+                value = self.get_combination_value(variable_name=variable, combination_tuple=combination)
                 try:
-                    self.mCAD_process.do_magnetic_calculation()
+                    self.mCAD_process.set_variable(variable, value)
                 except Exception as exc:
-                    print(value_row)
-                    raise ValueError(f"Failed to execute MCAD calculation.") from exc
+                    raise ValueError(f"Failed to set variable {variable} to value {value}.") from exc
 
-                for variable in output_parameters:
-                    try:
-                        value_row.append(float(self.mCAD_process.get_variable(variable)))
-                    except Exception as exc:
-                        raise ValueError(f"Failed to get variable {variable} from MCAD simulation.") from exc
+            test_passed = self.do_calculation_and_get_values(path_results=path_results, output_parameters=output_parameters)
 
-                with open(path_results, mode="a", newline="", encoding="utf-8") as file:
-                    writer = csv.writer(file, delimiter=";", quotechar='"')
-                    writer.writerow(value_row)
-
+            if test_passed:
                 comb_counter += 1
             else:
                 drop_counter += 1
