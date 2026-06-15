@@ -40,14 +40,10 @@ input_parameters = [
 
 with data_generating.MCADDataGenerator() as data_generator:
     data_generator.open_motorcad_file("base_first_data.mot")
-    value_df = data_generator.take_input_parameter(
+    data_generator.take_input_parameter(
         pd.DataFrame(
             input_parameters,
             columns=["name", "min_value", "max_value", "step_size"]
         )
     )
-    results_df = data_generator.execute_mcad_simulation(
-        value_df,
-        output_parameters=output_parameters
-    )
-    data_generator.export_results(results_df)
+    data_generator.placeholdername(output_parameters=output_parameters, running_number=1)
