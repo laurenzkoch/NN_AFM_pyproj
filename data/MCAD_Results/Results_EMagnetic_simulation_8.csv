@@ -1,1 +1,6 @@
-PeakCurrent;PhaseAdvance;Airgap;AFM_D_Rotor;Stator_Lam_Dia;Stator_Bore;Pole_Number;CircumferentialSegments;Magnet_Length;Slot_Number;Slot_Width;Slot_Depth;Stator_Lam_Length;Motor_Length;ShaftTorque;SystemEfficiency;ConductorLoss;MagnetLoss;StatorIronLoss_Total;RotorIronLoss_Total;WedgeLoss;WedgeLoss
+Motor_Length;ShaftTorque;SystemEfficiency;ConductorLoss;MagnetLoss;StatorIronLoss_Total;RotorIronLoss_Total;WedgeLoss
+100,0000;14,5720;93,9388;125,6140;5,8999;161,4992;2,3671;0,0000
+150,0000;14,5720;93,9388;125,6140;5,8999;161,4992;2,3671;0,0000
+200,0000;14,5720;93,9388;125,6140;5,8999;161,4992;2,3671;0,0000
+250,0000;14,5720;93,9388;125,6140;5,8999;161,4992;2,3671;0,0000
+300,0000;14,5720;93,9388;125,6140;5,8999;161,4992;2,3671;0,0000

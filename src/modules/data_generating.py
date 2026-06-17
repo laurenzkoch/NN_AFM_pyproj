@@ -3,7 +3,10 @@ from typing import Callable
 import pandas as pd
 from itertools import product
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import numpy as np
+import math
 from pathlib import Path
 
 from src.config import config_paths
@@ -19,7 +22,11 @@ class MCADDataGenerator:
     def __init__(self, start_eduvpn: bool = True):
         self.processmanager = process_managing.ProcessManager()
         self.eduVPN_process = None
-        self.input_value_array_df = pd.DataFrame()
+        self.input_value_array_df = pd.DataFrame(
+            columns=["name", "value_array"],
+        )
+        self.output_parameters: list[str] = []
+        self.number_of_combinations = 0
 
         if start_eduvpn:
             print("-----------Starting eduVPN----------")
@@ -45,7 +52,7 @@ class MCADDataGenerator:
                 self.eduVPN_process  = None
 
 
-    def open_motorcad_file(self, filename: str) -> None:
+    def open_motorcad_file(self, filename: str = "base_first_data.mot") -> None:
        file_path = self.PATH_MOTORCAD_DATA / filename
        if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
@@ -53,9 +60,10 @@ class MCADDataGenerator:
        self.mCAD_process.load_from_file(str(file_path))
 
 
-    def take_input_parameter(self, input_df: pd.DataFrame):
+    def take_parameter(self, input_df: pd.DataFrame, output_parameters: list[str]) -> None:
         print("---------Preparing input parameter------------")
         self.input_value_array_df, self.number_of_combinations = self.generate_input_value_array_df(input_df)
+        self.output_parameters = output_parameters
 
 
     @staticmethod
@@ -76,38 +84,60 @@ class MCADDataGenerator:
         for i in range(len(input_parameter_df["value_array"]) - 1):
             number_of_combinations = input_parameter_df["value_array"].iloc[i].__len__() * number_of_combinations
 
-        print(f"{number_of_combinations} combinations will be created.")
+        print(f"If Multi parameter variation: {number_of_combinations} combinations will be created.")
 
         return input_parameter_df, number_of_combinations
 
 
-    def get_combination_value(self, variable_name: str, combination_tuple: tuple) -> float:
-        variable_index = self.input_value_array_df["name"].tolist().index(variable_name)
-        return combination_tuple[variable_index]
-
-
     def test_boundary_conditions(self) -> bool:
 
-        if float(self.mCAD_process.get_variable("Slot_Depth")) >= float(self.mCAD_process.get_variable("Stator_Lam_Length")):
-             #print("test_boundary_conditions: Slot_Depth >= Stator_Lam_Length")
-             return False
-        if float(self.mCAD_process.get_variable("Motor_Length")) <= float(self.mCAD_process.get_variable("Stator_Lam_Length")):
-             #print("test_boundary_conditions: Motor_Length <= Stator_Lam_Length")
-             return False
-        if float(self.mCAD_process.get_variable("Magnet_Length")) <= float(self.mCAD_process.get_variable("Airgap")):
-             #print("test_boundary_conditions: Magnet_Length <= Airgap")
-             return False
-        if float(self.mCAD_process.get_variable("Magnet_Length")) >= float(self.mCAD_process.get_variable("Stator_Lam_Length")):
-             #print("test_boundary_conditions: Magnet_Length >= Stator_Lam_Length")
-             return False
-        if float(self.mCAD_process.get_variable("Stator_Bore")) >= float(self.mCAD_process.get_variable("Stator_Lam_Dia")):
-             #print("test_boundary_conditions: Stator_Bore >= Stator_Lam_Dia")
-             return False
-        if float(self.mCAD_process.get_variable("Stator_Bore")) <= float(self.mCAD_process.get_variable("Shaft_Dia")):
-             #print("test_boundary_conditions: Stator_Bore <= Shaft_Dia")
-             return False
-        if float(self.mCAD_process.get_variable("AFM_D_Rotor")) <= float(self.mCAD_process.get_variable("Stator_Bore")):
-             #print("test_boundary_conditions: AFM_D_Rotor <= Stator_Bore")
+        mcad = self.mCAD_process
+
+        slot_depth = float(mcad.get_variable("Slot_Depth"))
+        motor_length = float(mcad.get_variable("Motor_Length"))
+        magnet_length = float(mcad.get_variable("Magnet_Length"))
+        stator_lam_length = float(mcad.get_variable("Stator_Lam_Length"))
+        stator_bore = float(mcad.get_variable("Stator_Bore"))
+        afm_d_rotor = float(mcad.get_variable("AFM_D_Rotor"))
+        shaft_dia = float(mcad.get_variable("Shaft_Dia"))
+        magnet_thickness = float(mcad.get_variable("Magnet_Thickness"))
+        slot_number = int(mcad.get_variable("Slot_Number"))
+        pole_number = int(mcad.get_variable("Pole_Number"))
+        airgap = float(mcad.get_variable("Airgap"))
+        stator_lam_dia = float(mcad.get_variable("Stator_Lam_Dia"))
+        magphases = int(mcad.get_variable("MagPhases"))
+        mcf_pole_slot = math.gcd(slot_number, pole_number)
+        _, winding_mod = divmod(slot_number, (magphases * mcf_pole_slot))
+
+        if slot_depth >= stator_lam_length:
+            print("Warning: Slot depth is greater than stator lamination length. This is not allowed.")
+            return False
+        if motor_length <= stator_lam_length:
+            print("Warning: Motor length is less than stator lamination length. This is not allowed.")
+            return False
+        if magnet_length <= airgap:
+            print("Warning: Magnet length is less than airgap. This is not allowed.")
+            return False
+        if magnet_length >= stator_lam_length:
+            print("Warning: Magnet length is greater than stator lamination length. This is not allowed.")
+            return False
+        if stator_bore >= stator_lam_dia:
+            print("Warning: Stator bore is greater than stator lamination diameter. This is not allowed.")
+            return False
+        if stator_bore <= shaft_dia:
+            print("Warning: Stator bore is less than shaft diameter. This is not allowed.")
+            return False
+        if afm_d_rotor <= stator_bore:
+            print("Warning: AFM diameter of rotor is less than stator bore. This is not allowed.")
+            return False
+        if (afm_d_rotor - magnet_thickness)  >= stator_lam_dia:
+            print("Warning: AFM diameter of rotor minus magnet thickness is greater than stator lamination diameter. This is not allowed.")
+            return False
+        if ((afm_d_rotor - shaft_dia ) * 0.5)  <= magnet_thickness:
+            print("Warning: AFM diameter of rotor minus shaft diameter is less than or equal to magnet thickness. This is not allowed.")
+            return False
+        if  winding_mod != 0:
+             print("Warning: Slot number is not divisible by magphases*mcf pole slot. This is not allowed.")
              return False
 
         return True
@@ -117,7 +147,7 @@ class MCADDataGenerator:
     def track_progress(number_of_total_progress_steps: int) -> Callable[..., float]:
         starttime = time.time()
 
-        def inner_track_progress(progress_step: int, progress_percent: float = 0.0) -> float:
+        def inner_track_progress(progress_step: int) -> float:
             progress_percent_new = progress_step / number_of_total_progress_steps * 100
 
             elapsedtime = time.time() - starttime
@@ -126,241 +156,157 @@ class MCADDataGenerator:
             hours, remainder = divmod(remainder, 3600)
             minutes, seconds = divmod(remainder, 60)
 
-            if progress_percent_new >= progress_percent + 0 or progress_percent_new == 0:
-                print(f"{progress_percent_new:.1f}% done. Remaining time: {int(days)}d {int(hours)}h {int(minutes)}min {seconds:.2f}ss")
+            print(f"{progress_percent_new:.2f}% done. Remaining time: {int(days)}d {int(hours)}h {int(minutes)}min {seconds:.2f}s")
             return progress_percent_new
 
         return inner_track_progress
 
+    def set_values_in_mcad(self, variable_name: str, value: float) -> None:
+        try:
+            self.mCAD_process.set_variable(variable_name, value)
+        except Exception as exc:
+            raise ValueError(f"Failed to set variable {variable_name} to value {value}.") from exc
 
-    def do_calculation_and_get_values(self, path_results: Path, output_parameters: list[str]) -> bool:
+
+    def get_values_from_mcad(self) -> list[float]:
+
+        def make_parameter_list() -> list[str]:
+            parameter_list: list[str] = self.input_value_array_df["name"].tolist()
+            parameter_list.extend(self.output_parameters)
+            return parameter_list
+        parameters_list = make_parameter_list()
+
         value_row = []
+        for variable in parameters_list:
+            try:
+                value_row.append(float(self.mCAD_process.get_variable(variable)))
+            except Exception as exc:
+                raise ValueError(f"Failed to get variable {variable} from MCAD simulation.") from exc
+
+        return value_row
+
+    @staticmethod
+    def write_row_in_csv(path_results: Path, value_row: list[float]) -> None:
+
+        with open(path_results, mode="a", newline="", encoding="utf-8") as file:
+            writer = csv.writer(file, delimiter=";", quotechar='"')
+            formatted_value_row = [
+                f"{x:.4f}".replace(".", ",") if isinstance(x, float) else x
+                for x in value_row
+            ]
+            writer.writerow(formatted_value_row)
+
+
+    def do_calculation(self) -> None:
+        try:
+            self.mCAD_process.do_magnetic_calculation()
+        except Exception as exc:
+            raise ValueError(f"Failed to execute MCAD calculation.") from exc
+
+
+    def execute_mcad_simulation(
+            self,
+            path_results: Path,
+            comb_counter: int = 0,
+            drop_counter: int = 0
+    ) -> tuple[int, int]:
+
+        print("---------Starting MCAD simulation------------")
 
         if self.test_boundary_conditions():
-            try:
-                self.mCAD_process.do_magnetic_calculation()
-            except Exception as exc:
-                raise ValueError(f"Failed to execute MCAD calculation.") from exc
-
-            for variable in [str(self.input_value_array_df["name"].tolist() + output_parameters)]:
-                try:
-                    value_row.append(float(self.mCAD_process.get_variable(variable)))
-                except Exception as exc:
-                    raise ValueError(f"Failed to get variable {variable} from MCAD simulation.") from exc
-
-            with open(path_results, mode="a", newline="", encoding="utf-8") as file:
-                writer = csv.writer(file, delimiter=";", quotechar='"')
-                writer.writerow(value_row)
-            return True
+            self.do_calculation()
+            value_row = self.get_values_from_mcad()
+            self.write_row_in_csv(path_results, value_row)
+            comb_counter += 1
         else:
-            return False
+            drop_counter += 1
 
+        return comb_counter, drop_counter
 
+    def create_csv_file(self):
+        print("---------Creating CSV file------------")
 
-    def placeholdername(self, output_parameters: list[str], running_number: int = 1) -> Path:
+        current_time = datetime.now(ZoneInfo("Europe/Berlin")).strftime("%d.%m.%Y_%H-%M-%S_%Z")
 
-        filename = f"Results_EMagnetic_simulation_{running_number}.csv"
+        filename = f"Results_EMagnetic_simulation_{current_time}.csv"
         path_results = self.PATH_RESULTS / filename
-
-        if path_results.exists():
-            print(f"File {filename} already exists. Incrementing running number and trying again.")
-            running_number += 1
-            self.placeholdername(
-                output_parameters=output_parameters,
-                running_number=running_number
-            )
-            return path_results
 
         with open(path_results, mode="w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file, delimiter=";", quotechar='"')
-            writer.writerow(self.input_value_array_df["name"].tolist() + output_parameters)
+            writer.writerow(self.input_value_array_df["name"].tolist() + self.output_parameters)
+
+        return path_results
+
+
+
+    def single_parameter_variation(self) -> None:
+
+        path_results = self.create_csv_file()
 
         drop_counter = 0
         comb_counter = 0
-        progress_in_percent = 0.0
+        max_progress_steps = sum(len(self.input_value_array_df["value_array"].iloc[i]) for i in range(len(self.input_value_array_df)))
+        tracking_progress = self.track_progress(max_progress_steps)
+
+        def get_value_array(var_name: str) -> pd.Series:
+            index = self.input_value_array_df["name"].tolist().index(var_name)
+            return self.input_value_array_df["value_array"].iloc[index]
+
+        for variable_name in self.input_value_array_df["name"]:
+            self.open_motorcad_file()
+            print(f"---------Starting parameter variation: {variable_name}------------")
+
+            for value in get_value_array(var_name=variable_name):
+
+                self.set_values_in_mcad(variable_name, value)
+                comb_counter, drop_counter = self.execute_mcad_simulation(
+                    path_results=path_results,
+                    comb_counter=comb_counter,
+                    drop_counter=drop_counter
+                )
+
+                tracking_progress(
+                    comb_counter + drop_counter
+                )
+
+        print(f"{drop_counter} points dropped. {comb_counter} points saved.")
+
+
+    def multi_parameter_variation(self) -> None:
+
+        path_results = self.create_csv_file()
+
+        drop_counter = 0
+        comb_counter = 0
         tracking_progress = self.track_progress(self.number_of_combinations)
 
-        for combination in product(*self.input_value_array_df["value_array"].tolist()):
+        def get_combination_value(var_name: str, combination_tuple: tuple) -> float:
+            variable_index = self.input_value_array_df["name"].tolist().index(var_name)
+            return combination_tuple[variable_index]
 
+
+        for combination in product(*self.input_value_array_df["value_array"].tolist()):
 
             if comb_counter > 1000000:
                 raise OverflowError("Warning: The number of value combinations is too large."
                                     " Reducing the step sizes, intervall size or number of parameters.")
 
             for variable in self.input_value_array_df["name"]:
-                value = self.get_combination_value(variable_name=variable, combination_tuple=combination)
-                try:
-                    self.mCAD_process.set_variable(variable, value)
-                except Exception as exc:
-                    raise ValueError(f"Failed to set variable {variable} to value {value}.") from exc
+                value = get_combination_value(var_name=variable, combination_tuple=combination)
+                self.set_values_in_mcad(variable_name=variable, value=value)
 
-            test_passed = self.do_calculation_and_get_values(path_results=path_results, output_parameters=output_parameters)
+            comb_counter, drop_counter = self.execute_mcad_simulation(
+                path_results=path_results,
+                comb_counter=comb_counter,
+                drop_counter=drop_counter
+            )
 
-            if test_passed:
-                comb_counter += 1
-            else:
-                drop_counter += 1
-
-            progress_in_percent = tracking_progress(
-                drop_counter + comb_counter,
-                progress_percent=progress_in_percent
+            tracking_progress(
+                drop_counter + comb_counter
             )
 
 
-        print(f"{drop_counter} points dropped. {comb_counter} points saved. Input points saved in {filename}")
-
-        return path_results
+        print(f"{drop_counter} points dropped. {comb_counter} points saved.")
 
 
 
-"""    
-    def create_input_csv(self, input_parameters_df: pd.DataFrame, running_number: int = 1) -> Path:
-
-        filename = f"Results_EMagnetic_simulation_{running_number}.csv"
-        path_results = self.PATH_RESULTS / filename
-
-        if path_results.exists():
-            print(f"File {filename} already exists. Incrementing running number and trying again.")
-            running_number += 1
-            self.create_input_csv(
-                input_parameters_df=input_parameters_df,
-                running_number=running_number
-            )
-            return path_results
-
-        def test_boundary_conditions(combination_values: tuple) -> bool:
-            test_passed = True
-
-            def get_combination_value(column_name: str) -> float:
-                column_index = input_parameters_df["name"].tolist().index(column_name)
-                return combination_values[column_index]
-
-            if "Slot_Depth" in input_parameters_df["name"] and "Stator_Lam_Length" in input_parameters_df["name"]:
-                if get_combination_value("Slot_Depth") > get_combination_value("Stator_Lam_Length"):
-                    test_passed = False
-            if "Motor_Length" in input_parameters_df["name"] and "Stator_Lam_Length" in input_parameters_df["name"]:
-                if get_combination_value("Motor_Length") < get_combination_value("Stator_Lam_Length"):
-                    test_passed = False
-            if "Magnet_Length" in input_parameters_df["name"] and "Airgap" in input_parameters_df["name"]:
-                if get_combination_value("Magnet_Length") < get_combination_value("Airgap"):
-                    test_passed = False
-            if "Magnet_Length" in input_parameters_df["name"] and "Stator_Lam_Length" in input_parameters_df["name"]:
-                if get_combination_value("Magnet_Length") > get_combination_value("Stator_Lam_Length"):
-                    test_passed = False
-            if "Stator_Bore" in input_parameters_df["name"] and "Stator_Lam_Dia" in input_parameters_df["name"]:
-                if get_combination_value("Stator_Bore") > get_combination_value("Stator_Lam_Dia"):
-                    test_passed = False
-
-            return test_passed
-
-
-        with open(path_results, mode="w", newline="", encoding="utf-8") as file:
-            writer = csv.writer(file, delimiter=";", quotechar='"')
-            writer.writerow(input_parameters_df["name"].tolist())
-
-        drop_counter = 0
-        comb_counter = 0
-        for combination in product(*input_parameters_df["value_array"].tolist()):
-            if comb_counter > 1000000:
-                raise OverflowError("Warning: The number of value combinations is too large."
-                                    " Reducing the step sizes, intervall size or number of parameters.")
-
-            if test_boundary_conditions(combination):
-                with open(path_results, mode="a", newline="", encoding="utf-8") as file:
-                    writer = csv.writer(file, delimiter=";", quotechar='"')
-                    writer.writerow(combination)
-                    comb_counter += 1
-            else:
-                drop_counter += 1
-
-        print(f"{drop_counter} points dropped. {comb_counter} points saved. Input points saved in {filename}")
-
-        return path_results
-
-    def execute_mcad_simulation(self, path_results: Path, output_parameters: list[str]) -> pd.DataFrame:
-        print("---------Starting MCAD simulation------------")
-
-        def track_progress(number_of_total_progress_steps: int) -> Callable[..., float]:
-            starttime = time.time()
-
-            def inner_track_progress(progress_step: int, progress_percent: float = 0.0) -> float:
-                progress_percent_new = progress_step / number_of_total_progress_steps * 100
-
-                elapsedtime = time.time() - starttime
-                remainingtime = (elapsedtime / progress_step * (number_of_total_progress_steps - progress_step))
-                hours = int(remainingtime // 3600)
-                minutes = int((remainingtime % 3600) // 60)
-                seconds = remainingtime % 60
-
-                if progress_percent_new >= progress_percent + 10 or progress_percent_new == 0:
-                    print(f"{progress_percent_new:.1f}% done. Remaining time: {hours}h {minutes}min {seconds:.2f}ss")
-                return progress_percent_new
-
-            return inner_track_progress
-
-        input_values_df = pd.read_csv(
-            path_results,
-            usecols=[0, row],
-            sep=";",
-            decimal=","
-        )
-        output_rows = []
-        total_simulations = len(input_values_df)
-        tracking_progress = track_progress(total_simulations)
-        progress_in_percent = 0.0
-
-        for index, (_, row) in enumerate(input_values_df.iterrows(), start=1):
-
-            progress_in_percent = tracking_progress(index, progress_percent=progress_in_percent)
-
-            for variable in input_values_df.columns:
-                value = float(row[str(variable)])
-                try:
-                    self.mCAD_process.set_variable(variable, value)
-                except Exception as exc:
-                    raise ValueError(f"Failed to set variable {variable} to value {value}.") from exc
-
-            try:
-                self.mCAD_process.do_magnetic_calculation()
-            except Exception as exc:
-                raise ValueError(f"Failed to execute MCAD calculation.") from exc
-
-            output_row = {}
-            for variable in output_parameters:
-                try:
-                    output_row[variable] = float(self.mCAD_process.get_variable(variable))
-                except Exception as exc:
-                    raise ValueError(f"Failed to get variable {variable} from MCAD simulation.") from exc
-
-            output_rows.append(output_row)
-
-        output_values_df = pd.DataFrame(output_rows, columns=output_parameters)
-
-        results_df = pd.concat(
-            [
-                input_values_df.reset_index(drop=True),
-                output_values_df.reset_index(drop=True)
-            ],
-            axis=1
-        )
-
-        print("---------MCAD simulation finished------------")
-        print(f"{len(results_df)} datapoints have been created.")
-
-        return results_df
-
-    def export_results(self, results_df:pd.DataFrame, running_number: int = 1) -> None:
-        filename = f"Results_EMagnetic_simulation_{running_number}.csv"
-        path_results = self.PATH_RESULTS / filename
-
-        if path_results.exists():
-            print(f"File {filename} already exists. Incrementing running number and trying again.")
-            running_number += 1
-            self.export_results(results_df, running_number)
-            return
-
-        results_df.to_csv(path_results, index=False, sep=";", decimal=",", float_format="%.4f", encoding="utf-8")
-        print(f"Results saved as {filename}")
-
-
-"""
