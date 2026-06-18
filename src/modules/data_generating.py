@@ -93,52 +93,76 @@ class MCADDataGenerator:
 
         mcad = self.mCAD_process
 
-        slot_depth = float(mcad.get_variable("Slot_Depth"))
-        motor_length = float(mcad.get_variable("Motor_Length"))
-        magnet_length = float(mcad.get_variable("Magnet_Length"))
-        stator_lam_length = float(mcad.get_variable("Stator_Lam_Length"))
+        #radial - stator
+        stator_lam_dia = float(mcad.get_variable("Stator_Lam_Dia"))
         stator_bore = float(mcad.get_variable("Stator_Bore"))
+        slot_width = float(mcad.get_variable("Slot_Width"))
+
+        #radial - rotor
         afm_d_rotor = float(mcad.get_variable("AFM_D_Rotor"))
         shaft_dia = float(mcad.get_variable("Shaft_Dia"))
+        shaft_hole_diameter = float(mcad.get_variable("Shaft_Hole_Diameter"))
+        magnet_embed_depth = float(mcad.get_variable("Magnet_Embed_Depth"))
         magnet_thickness = float(mcad.get_variable("Magnet_Thickness"))
+
+        #axial
+        motor_length = float(mcad.get_variable("Motor_Length"))
+        stator_lam_length = float(mcad.get_variable("Stator_Lam_Length"))
+        slot_depth = float(mcad.get_variable("Slot_Depth"))
+        rotor_lam_length = float(mcad.get_variable("Rotor_Lam_Length"))
+        magnet_length = float(mcad.get_variable("Magnet_Length"))
+
+        #winding
         slot_number = int(mcad.get_variable("Slot_Number"))
         pole_number = int(mcad.get_variable("Pole_Number"))
         airgap = float(mcad.get_variable("Airgap"))
-        stator_lam_dia = float(mcad.get_variable("Stator_Lam_Dia"))
         magphases = int(mcad.get_variable("MagPhases"))
+
+        dia_mag_i = (afm_d_rotor - 2 * magnet_embed_depth - 2 * magnet_thickness)
+        dia_mag_a = (afm_d_rotor - 2 * magnet_embed_depth)
+        activ_length = min(stator_lam_dia, dia_mag_a) - max(stator_bore, dia_mag_i)
+        mean_dia_of_mag_length = (dia_mag_a + dia_mag_i) / 2
+        stator_width_per_slot = math.pi * mean_dia_of_mag_length / slot_number
         mcf_pole_slot = math.gcd(slot_number, pole_number)
         _, winding_mod = divmod(slot_number, (magphases * mcf_pole_slot))
 
-        if slot_depth >= stator_lam_length:
-            print("Warning: Slot depth is greater than stator lamination length. This is not allowed.")
-            return False
-        if motor_length <= stator_lam_length:
-            print("Warning: Motor length is less than stator lamination length. This is not allowed.")
-            return False
-        if magnet_length <= airgap:
-            print("Warning: Magnet length is less than airgap. This is not allowed.")
-            return False
-        if magnet_length >= stator_lam_length:
-            print("Warning: Magnet length is greater than stator lamination length. This is not allowed.")
-            return False
+
+        #radial - stator
         if stator_bore >= stator_lam_dia:
-            print("Warning: Stator bore is greater than stator lamination diameter. This is not allowed.")
+            print("Warning: Stator bore is greater than stator lamination diameter.")
             return False
         if stator_bore <= shaft_dia:
-            print("Warning: Stator bore is less than shaft diameter. This is not allowed.")
+            print("Warning: Stator bore is less than shaft diameter.")
             return False
-        if afm_d_rotor <= stator_bore:
-            print("Warning: AFM diameter of rotor is less than stator bore. This is not allowed.")
+        #radial - rotor
+        if dia_mag_i  <= shaft_dia:
+            print("Warning: Magnets too thick for rotor diameter or rotor diameter is less than shaft diameter.")
             return False
-        if (afm_d_rotor - magnet_thickness)  >= stator_lam_dia:
-            print("Warning: AFM diameter of rotor minus magnet thickness is greater than stator lamination diameter. This is not allowed.")
+        if shaft_hole_diameter >= stator_lam_dia:
+            print("Warning: Shaft hole diameter is greater than stator lamination diameter.")
             return False
-        if ((afm_d_rotor - shaft_dia ) * 0.5)  <= magnet_thickness:
-            print("Warning: AFM diameter of rotor minus shaft diameter is less than or equal to magnet thickness. This is not allowed.")
+
+        #axial
+        if motor_length <= (2 * (stator_lam_length + airgap + magnet_length) + rotor_lam_length):
+            print(f"Warning: Motor length is too short.")
             return False
+        if slot_depth >= stator_lam_length:
+            print("Warning: Slot depth is greater than stator lamination length.")
+            return False
+
+        #winding
         if  winding_mod != 0:
              print("Warning: Slot number is not divisible by magphases*mcf pole slot. This is not allowed.")
              return False
+        if slot_width >= stator_width_per_slot:
+            print("Warning: Slot width is greater than stator width per slot.")
+            return False
+
+
+        #magnet length
+        if activ_length <= 0:
+            print("Warning: Magnet length is less than 0")
+            return False
 
         return True
 
@@ -211,8 +235,6 @@ class MCADDataGenerator:
             drop_counter: int = 0
     ) -> tuple[int, int]:
 
-        print("---------Starting MCAD simulation------------")
-
         if self.test_boundary_conditions():
             self.do_calculation()
             value_row = self.get_values_from_mcad()
@@ -265,9 +287,9 @@ class MCADDataGenerator:
                     drop_counter=drop_counter
                 )
 
-                tracking_progress(
-                    comb_counter + drop_counter
-                )
+            tracking_progress(
+                comb_counter + drop_counter
+            )
 
         print(f"{drop_counter} points dropped. {comb_counter} points saved.")
 
