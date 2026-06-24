@@ -1,32 +1,50 @@
 import csv
+from dataclasses import dataclass
 from typing import Callable
-import pandas as pd
-from itertools import product
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
-import numpy as np
 import math
 from pathlib import Path
 
 from src.config import config_paths
-from src.modules import process_managing
+from src.modules import process_managing, data_managing
 import ansys.motorcad.core as pymotorcad
 
-class MCADDataGenerator:
+@dataclass
+class PARAMETERDICT:
+    variable_name: str
+    value_list: list[float]
 
-    PATH_MOTORCAD_DATA = config_paths.PATH_MCAD_DATA
-    PATH_RESULTS = config_paths.PATH_DATA_MCAD_RESULTS
-    PATH_RESULTS.mkdir(exist_ok=True)
+class MCADDataGenerator(data_managing.DataManager):
+
+    PARAMETER_LIST = [
+        "Stator_Lam_Dia",
+        "Stator_Bore",
+        "Slot_Width",
+        "AFM_D_Rotor",
+        "Shaft_Dia",
+        "Shaft_Hole_Diameter",
+        "Magnet_Embed_Depth",
+        "Magnet_Thickness",
+        "Motor_Length",
+        "Stator_Lam_Length",
+        "Slot_Depth",
+        "Rotor_Lam_Length",
+        "Magnet_Length",
+        "Slot_Number",
+        "Pole_Number",
+        "Airgap",
+        "MagPhases",
+        "PeakCurrent",
+        "PhaseAdvance",
+    ]
+
 
     def __init__(self, start_eduvpn: bool = True):
+        super().__init__()
         self.processmanager = process_managing.ProcessManager()
         self.eduVPN_process = None
-        self.input_value_array_df = pd.DataFrame(
-            columns=["name", "value_array"],
-        )
-        self.output_parameters: list[str] = []
-        self.number_of_combinations = 0
 
         if start_eduvpn:
             print("-----------Starting eduVPN----------")
@@ -53,19 +71,20 @@ class MCADDataGenerator:
 
 
     def open_motorcad_file(self, filename: str = "base_first_data.mot") -> None:
-       file_path = self.PATH_MOTORCAD_DATA / filename
+       file_path = config_paths.PATH_MCAD_DATA / filename
        if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 
        self.mCAD_process.load_from_file(str(file_path))
 
-
+    """
     def take_parameter(self, input_df: pd.DataFrame, output_parameters: list[str]) -> None:
         print("---------Preparing input parameter------------")
         self.input_value_array_df, self.number_of_combinations = self.generate_input_value_array_df(input_df)
-        self.output_parameters = output_parameters
+        self.output_parameters = output_parameters"""
 
 
+    """ 
     @staticmethod
     def generate_input_value_array_df(input_parameter_df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
 
@@ -86,45 +105,54 @@ class MCADDataGenerator:
 
         print(f"If Multi parameter variation: {number_of_combinations} combinations will be created.")
 
-        return input_parameter_df, number_of_combinations
+        return input_parameter_df, number_of_combinations"""
 
 
-    def test_boundary_conditions(self) -> bool:
+    def test_boundary_conditions(self, values: list[float]) -> bool:
 
-        mcad = self.mCAD_process
+        keys = self.PARAMETER_LIST
+
+        if len(keys) != len(values):
+            raise ValueError("Anzahl der keys stimmt nicht mit Anzahl der values überein")
+
+        parameter_dict = {
+            k: float(v)
+            for k, v in zip(keys, values)
+        }
 
         #radial - stator
-        stator_lam_dia = float(mcad.get_variable("Stator_Lam_Dia"))
-        stator_bore = float(mcad.get_variable("Stator_Bore"))
-        slot_width = float(mcad.get_variable("Slot_Width"))
+        stator_lam_dia = parameter_dict["Stator_Lam_Dia"]
+        stator_bore = parameter_dict["Stator_Bore"]
+        slot_width = parameter_dict["Slot_Width"]
 
         #radial - rotor
-        afm_d_rotor = float(mcad.get_variable("AFM_D_Rotor"))
-        shaft_dia = float(mcad.get_variable("Shaft_Dia"))
-        shaft_hole_diameter = float(mcad.get_variable("Shaft_Hole_Diameter"))
-        magnet_embed_depth = float(mcad.get_variable("Magnet_Embed_Depth"))
-        magnet_thickness = float(mcad.get_variable("Magnet_Thickness"))
+        afm_d_rotor = parameter_dict["AFM_D_Rotor"]
+        shaft_dia = parameter_dict["Shaft_Dia"]
+        shaft_hole_diameter = parameter_dict["Shaft_Hole_Diameter"]
+        magnet_embed_depth = parameter_dict["Magnet_Embed_Depth"]
+        magnet_thickness = parameter_dict["Magnet_Thickness"]
 
         #axial
-        motor_length = float(mcad.get_variable("Motor_Length"))
-        stator_lam_length = float(mcad.get_variable("Stator_Lam_Length"))
-        slot_depth = float(mcad.get_variable("Slot_Depth"))
-        rotor_lam_length = float(mcad.get_variable("Rotor_Lam_Length"))
-        magnet_length = float(mcad.get_variable("Magnet_Length"))
+        motor_length = parameter_dict["Motor_Length"]
+        stator_lam_length = parameter_dict["Stator_Lam_Length"]
+        slot_depth = parameter_dict["Slot_Depth"]
+        rotor_lam_length = parameter_dict["Rotor_Lam_Length"]
+        magnet_length = parameter_dict["Magnet_Length"]
 
         #winding
-        slot_number = int(mcad.get_variable("Slot_Number"))
-        pole_number = int(mcad.get_variable("Pole_Number"))
-        airgap = float(mcad.get_variable("Airgap"))
-        magphases = int(mcad.get_variable("MagPhases"))
+        slot_number = int(parameter_dict["Slot_Number"])
+        pole_number = int(parameter_dict["Pole_Number"])
+        airgap = parameter_dict["Airgap"]
+        magphases = int(parameter_dict["MagPhases"])
 
         dia_mag_i = (afm_d_rotor - 2 * magnet_embed_depth - 2 * magnet_thickness)
         dia_mag_a = (afm_d_rotor - 2 * magnet_embed_depth)
         activ_length = min(stator_lam_dia, dia_mag_a) - max(stator_bore, dia_mag_i)
         mean_dia_of_mag_length = (dia_mag_a + dia_mag_i) / 2
         stator_width_per_slot = math.pi * mean_dia_of_mag_length / slot_number
-        mcf_pole_slot = math.gcd(slot_number, pole_number)
-        _, winding_mod = divmod(slot_number, (magphases * mcf_pole_slot))
+        winding_gcd = math.gcd(slot_number, pole_number)
+        winding_denominator = magphases * winding_gcd
+        winding_ratio = slot_number / winding_denominator
 
 
         #radial - stator
@@ -151,9 +179,14 @@ class MCADDataGenerator:
             return False
 
         #winding
-        if  winding_mod != 0:
-             print("Warning: Slot number is not divisible by magphases*mcf pole slot. This is not allowed.")
-             return False
+        if not winding_ratio.is_integer() or winding_ratio < 1:
+            print(
+                "Warning: Winding is not feasible. "
+                f"Slot_Number / MagPhases / gcd(Pole_Number, Slot_Number) = "
+                f"{slot_number} / {magphases} / {winding_gcd} = {winding_ratio:.6f}."
+            )
+            return False
+
         if slot_width >= stator_width_per_slot:
             print("Warning: Slot width is greater than stator width per slot.")
             return False
@@ -185,6 +218,7 @@ class MCADDataGenerator:
 
         return inner_track_progress
 
+
     def set_values_in_mcad(self, variable_name: str, value: float) -> None:
         try:
             self.mCAD_process.set_variable(variable_name, value)
@@ -192,101 +226,93 @@ class MCADDataGenerator:
             raise ValueError(f"Failed to set variable {variable_name} to value {value}.") from exc
 
 
-    def get_values_from_mcad(self) -> list[float]:
-
-        def make_parameter_list() -> list[str]:
-            parameter_list: list[str] = self.input_value_array_df["name"].tolist()
-            parameter_list.extend(self.output_parameters)
-            return parameter_list
-        parameters_list = make_parameter_list()
+    def get_values_from_mcad(self, parameter_list: list[str]) -> list[float]:
 
         value_row = []
-        for variable in parameters_list:
+        for variable in parameter_list:
             try:
-                value_row.append(float(self.mCAD_process.get_variable(variable)))
+                value_row.append(
+                    float(self.mCAD_process.get_variable(variable))
+                )
             except Exception as exc:
                 raise ValueError(f"Failed to get variable {variable} from MCAD simulation.") from exc
 
         return value_row
 
-    @staticmethod
-    def write_row_in_csv(path_results: Path, value_row: list[float]) -> None:
 
-        with open(path_results, mode="a", newline="", encoding="utf-8") as file:
-            writer = csv.writer(file, delimiter=";", quotechar='"')
-            formatted_value_row = [
-                f"{x:.4f}".replace(".", ",") if isinstance(x, float) else x
-                for x in value_row
-            ]
-            writer.writerow(formatted_value_row)
-
-
-    def do_calculation(self) -> None:
+    def do_calculation(self) -> bool:
         try:
             self.mCAD_process.do_magnetic_calculation()
+            return True
         except Exception as exc:
-            raise ValueError(f"Failed to execute MCAD calculation.") from exc
+            print("Warning: Motor-CAD rejected this design point.")
+            print(f"Motor-CAD error: {exc}")
+            return False
 
 
     def execute_mcad_simulation(
             self,
+            output_parameters: list[str],
             path_results: Path,
             comb_counter: int = 0,
             drop_counter: int = 0
     ) -> tuple[int, int]:
 
-        if self.test_boundary_conditions():
-            self.do_calculation()
-            value_row = self.get_values_from_mcad()
-            self.write_row_in_csv(path_results, value_row)
-            comb_counter += 1
+        value_row = self.get_values_from_mcad(self.PARAMETER_LIST)
+
+        if self.test_boundary_conditions(value_row):
+            if self.do_calculation():
+                value_row.extend(self.get_values_from_mcad(output_parameters))
+                self.write_row_in_csv(path_results, value_row)
+                comb_counter += 1
+            else:
+                drop_counter += 1
         else:
             drop_counter += 1
 
         return comb_counter, drop_counter
 
-    def create_csv_file(self):
-        print("---------Creating CSV file------------")
+
+    @staticmethod
+    def create_csv_file(parameter_name: str, columns_list: list[str]):
+        print(f"---------Creating CSV file for {parameter_name}-variation------------")
 
         current_time = datetime.now(ZoneInfo("Europe/Berlin")).strftime("%d.%m.%Y_%H-%M-%S_%Z")
 
-        filename = f"Results_EMagnetic_simulation_{current_time}.csv"
-        path_results = self.PATH_RESULTS / filename
+        filename = f"Results_EMagnetic_simulation_{parameter_name}_{current_time}.csv"
+
+        config_paths.PATH_DATA_MCAD_RESULTS.mkdir(exist_ok=True)
+        path_results = config_paths.PATH_DATA_MCAD_RESULTS / filename
 
         with open(path_results, mode="w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file, delimiter=";", quotechar='"')
-            writer.writerow(self.input_value_array_df["name"].tolist() + self.output_parameters)
+            writer.writerow(columns_list)
 
         return path_results
 
 
+    def single_parameter_variation(self, parameter: PARAMETERDICT, output_parameters: list[str], base_filename: str = "base_first_data.mot") -> None:
 
-    def single_parameter_variation(self) -> None:
-
-        path_results = self.create_csv_file()
+        path_results = self.create_csv_file(
+            parameter_name=parameter.variable_name,
+            columns_list=self.PARAMETER_LIST + output_parameters
+        )
+        self.open_motorcad_file(filename=base_filename)
 
         drop_counter = 0
         comb_counter = 0
-        max_progress_steps = sum(len(self.input_value_array_df["value_array"].iloc[i]) for i in range(len(self.input_value_array_df)))
+        max_progress_steps = len(parameter.value_list)
         tracking_progress = self.track_progress(max_progress_steps)
 
-        def get_value_array(var_name: str) -> pd.Series:
-            index = self.input_value_array_df["name"].tolist().index(var_name)
-            return self.input_value_array_df["value_array"].iloc[index]
+        for value in parameter.value_list:
 
-        for variable_name in self.input_value_array_df["name"]:
-            self.open_motorcad_file()
-            print(f"---------Starting parameter variation: {variable_name}------------")
-
-            for value in get_value_array(var_name=variable_name):
-
-                self.set_values_in_mcad(variable_name, value)
-                comb_counter, drop_counter = self.execute_mcad_simulation(
-                    path_results=path_results,
-                    comb_counter=comb_counter,
-                    drop_counter=drop_counter
-                )
-
+            self.set_values_in_mcad(parameter.variable_name, value)
+            comb_counter, drop_counter = self.execute_mcad_simulation(
+                output_parameters=output_parameters,
+                path_results=path_results,
+                comb_counter=comb_counter,
+                drop_counter=drop_counter
+            )
             tracking_progress(
                 comb_counter + drop_counter
             )
@@ -294,7 +320,7 @@ class MCADDataGenerator:
         print(f"{drop_counter} points dropped. {comb_counter} points saved.")
 
 
-    def multi_parameter_variation(self) -> None:
+    """def multi_parameter_variation(self) -> None:
 
         path_results = self.create_csv_file()
 
@@ -318,6 +344,7 @@ class MCADDataGenerator:
                 self.set_values_in_mcad(variable_name=variable, value=value)
 
             comb_counter, drop_counter = self.execute_mcad_simulation(
+                output_parameters=self.output_parameters,
                 path_results=path_results,
                 comb_counter=comb_counter,
                 drop_counter=drop_counter
@@ -328,7 +355,7 @@ class MCADDataGenerator:
             )
 
 
-        print(f"{drop_counter} points dropped. {comb_counter} points saved.")
+        print(f"{drop_counter} points dropped. {comb_counter} points saved.")"""
 
 
 

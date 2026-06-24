@@ -1,5 +1,7 @@
+
+from src.modules.data_generating import PARAMETERDICT
+import numpy as np
 from src.modules import data_generating
-import pandas as pd
 
 #list with all output parameters (str)
 output_parameters = [
@@ -14,31 +16,30 @@ output_parameters = [
 
 #data sets for the input parameters
 input_parameters = [
-    {"name": "PeakCurrent", "min_value": 1, "max_value": 100, "step_size": 2},
-    {"name": "PhaseAdvance", "min_value": 0, "max_value": 180, "step_size": 3},
-    {"name": "Airgap", "min_value": 0.1, "max_value": 5, "step_size": 0.3},
-    {"name": "AFM_D_Rotor", "min_value": 10, "max_value": 500, "step_size": 10},
-    {"name": "Stator_Lam_Dia", "min_value": 10, "max_value": 500, "step_size": 10},
-    {"name": "Stator_Bore", "min_value": 10, "max_value": 500, "step_size": 10},
-    {"name": "Pole_Number", "min_value": 2, "max_value": 20, "step_size": 1},
-    {"name": "CircumferentialSegments", "min_value": 1, "max_value": 10, "step_size": 1},
-    {"name": "Magnet_Length", "min_value": 1, "max_value": 50, "step_size": 2},
-    {"name": "Magnet_Thickness", "min_value": 10, "max_value": 500, "step_size": 5},
-    {"name": "Slot_Number", "min_value": 2, "max_value": 40, "step_size": 1},
-    {"name": "Slot_Width", "min_value": 1, "max_value": 20, "step_size": 1},
-    {"name": "Slot_Depth", "min_value": 1, "max_value": 50, "step_size": 1},
-    {"name": "Stator_Lam_Length", "min_value": 10, "max_value": 500, "step_size": 10},
-    {"name": "Motor_Length", "min_value": 10, "max_value": 800, "step_size": 50},
+    #PARAMETERDICT(variable_name= "PeakCurrent",         value_list=np.arange(0, 100, 5).tolist()),
+    #PARAMETERDICT(variable_name= "PhaseAdvance",        value_list=np.arange(0, 180, 2).tolist()),
+    #PARAMETERDICT(variable_name= "Airgap",              value_list=np.arange(0.1, 5, 0.2).tolist()),
+    #PARAMETERDICT(variable_name= "AFM_D_Rotor",         value_list=np.arange(10, 500, 10).tolist()),
+    #PARAMETERDICT(variable_name= "Stator_Lam_Dia",      value_list=np.arange(10, 500, 10).tolist()),
+    #PARAMETERDICT(variable_name= "Stator_Bore",         value_list=np.arange(10, 500, 10).tolist()),
+    #PARAMETERDICT(variable_name= "Pole_Number",         value_list=np.arange(2, 20, 1).tolist()),
+    #PARAMETERDICT(variable_name= "Magnet_Thickness",    value_list=np.arange(10, 500, 5).tolist()),
+    PARAMETERDICT(variable_name= "Slot_Number",         value_list=np.arange(2, 40, 1).tolist()),
+    #PARAMETERDICT(variable_name= "Slot_Width",          value_list=np.arange(0, 20, 2).tolist()),
+    #PARAMETERDICT(variable_name= "Slot_Depth",          value_list=np.arange(1, 50, 1).tolist()),
+    #PARAMETERDICT(variable_name= "Stator_Lam_Length",   value_list=np.arange(10, 200, 10).tolist()),
+    #PARAMETERDICT(variable_name= "Motor_Length",        value_list=np.arange(10, 800, 50).tolist())
 ]
 
 
 with data_generating.MCADDataGenerator() as data_generator:
-    data_generator.take_parameter(
-        pd.DataFrame(
-            input_parameters,
-            columns=["name", "min_value", "max_value", "step_size"]
-        ),
-        output_parameters=output_parameters
-    )
-    data_generator.single_parameter_variation()
-    #data_generator.multi_parameter_variation()
+    print(f"---------Starting parameter variation with {len(input_parameters)} parameters------------")
+
+    for pardi_j in input_parameters:
+        data_generator.single_parameter_variation(
+            parameter=pardi_j,
+            output_parameters=output_parameters
+        )
+
+    print("---------Parameter variation finished. Closing MCAD------------")
+
