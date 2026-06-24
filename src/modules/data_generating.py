@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import math
 from pathlib import Path
 
-from src.config import config_paths
+from src.config import config_paths, config_parameter_lists
 from src.modules import process_managing, data_managing
 import ansys.motorcad.core as pymotorcad
 
@@ -18,28 +18,7 @@ class PARAMETERDICT:
 
 class MCADDataGenerator(data_managing.DataManager):
 
-    PARAMETER_LIST = [
-        "Stator_Lam_Dia",
-        "Stator_Bore",
-        "Slot_Width",
-        "AFM_D_Rotor",
-        "Shaft_Dia",
-        "Shaft_Hole_Diameter",
-        "Magnet_Embed_Depth",
-        "Magnet_Thickness",
-        "Motor_Length",
-        "Stator_Lam_Length",
-        "Slot_Depth",
-        "Rotor_Lam_Length",
-        "Magnet_Length",
-        "Slot_Number",
-        "Pole_Number",
-        "Airgap",
-        "MagPhases",
-        "PeakCurrent",
-        "PhaseAdvance",
-    ]
-
+    parameter_list = config_parameter_lists.PARAMETER_LIST
 
     def __init__(self, start_eduvpn: bool = True):
         super().__init__()
@@ -77,40 +56,10 @@ class MCADDataGenerator(data_managing.DataManager):
 
        self.mCAD_process.load_from_file(str(file_path))
 
-    """
-    def take_parameter(self, input_df: pd.DataFrame, output_parameters: list[str]) -> None:
-        print("---------Preparing input parameter------------")
-        self.input_value_array_df, self.number_of_combinations = self.generate_input_value_array_df(input_df)
-        self.output_parameters = output_parameters"""
-
-
-    """ 
-    @staticmethod
-    def generate_input_value_array_df(input_parameter_df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
-
-        input_parameter_df["value_array"] = [
-            np.arange(
-                float(row["min_value"]),
-                float(row["max_value"]),
-                float(row["step_size"])
-            ).tolist()
-            for _, row in input_parameter_df.iterrows()
-        ]
-
-        input_parameter_df.drop(columns=["min_value", "max_value", "step_size"], inplace=True)
-
-        number_of_combinations = 1
-        for i in range(len(input_parameter_df["value_array"]) - 1):
-            number_of_combinations = input_parameter_df["value_array"].iloc[i].__len__() * number_of_combinations
-
-        print(f"If Multi parameter variation: {number_of_combinations} combinations will be created.")
-
-        return input_parameter_df, number_of_combinations"""
-
 
     def test_boundary_conditions(self, values: list[float]) -> bool:
 
-        keys = self.PARAMETER_LIST
+        keys = self.parameter_list
 
         if len(keys) != len(values):
             raise ValueError("Anzahl der keys stimmt nicht mit Anzahl der values überein")
@@ -258,7 +207,7 @@ class MCADDataGenerator(data_managing.DataManager):
             drop_counter: int = 0
     ) -> tuple[int, int]:
 
-        value_row = self.get_values_from_mcad(self.PARAMETER_LIST)
+        value_row = self.get_values_from_mcad(self.parameter_list)
 
         if self.test_boundary_conditions(value_row):
             if self.do_calculation():
@@ -295,7 +244,7 @@ class MCADDataGenerator(data_managing.DataManager):
 
         path_results = self.create_csv_file(
             parameter_name=parameter.variable_name,
-            columns_list=self.PARAMETER_LIST + output_parameters
+            columns_list=self.parameter_list + output_parameters
         )
         self.open_motorcad_file(filename=base_filename)
 
@@ -318,44 +267,3 @@ class MCADDataGenerator(data_managing.DataManager):
             )
 
         print(f"{drop_counter} points dropped. {comb_counter} points saved.")
-
-
-    """def multi_parameter_variation(self) -> None:
-
-        path_results = self.create_csv_file()
-
-        drop_counter = 0
-        comb_counter = 0
-        tracking_progress = self.track_progress(self.number_of_combinations)
-
-        def get_combination_value(var_name: str, combination_tuple: tuple) -> float:
-            variable_index = self.input_value_array_df["name"].tolist().index(var_name)
-            return combination_tuple[variable_index]
-
-
-        for combination in product(*self.input_value_array_df["value_array"].tolist()):
-
-            if comb_counter > 1000000:
-                raise OverflowError("Warning: The number of value combinations is too large."
-                                    " Reducing the step sizes, intervall size or number of parameters.")
-
-            for variable in self.input_value_array_df["name"]:
-                value = get_combination_value(var_name=variable, combination_tuple=combination)
-                self.set_values_in_mcad(variable_name=variable, value=value)
-
-            comb_counter, drop_counter = self.execute_mcad_simulation(
-                output_parameters=self.output_parameters,
-                path_results=path_results,
-                comb_counter=comb_counter,
-                drop_counter=drop_counter
-            )
-
-            tracking_progress(
-                drop_counter + comb_counter
-            )
-
-
-        print(f"{drop_counter} points dropped. {comb_counter} points saved.")"""
-
-
-

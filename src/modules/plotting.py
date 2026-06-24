@@ -120,6 +120,7 @@ class Plotter:
         )
         return ax
 
+
     def save_plot(self, fig: Figure, path_plots: str | Path, filename: str):
         path_plots = Path(__file__).resolve().parent.parent / path_plots
         path_plots.mkdir(exist_ok=True)

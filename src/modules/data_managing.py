@@ -16,6 +16,7 @@ class DataManager:
         data_df = pd.read_csv(path_data / filename, encoding='utf-8', sep=";", decimal=",")
         return data_df
 
+
     @staticmethod
     def split_data(
             data_df: pd.DataFrame,
@@ -25,8 +26,12 @@ class DataManager:
         y_df = data_df.iloc[:, -number_of_outputs:]
         return x_df, y_df
 
+
     @staticmethod
-    def write_row_in_csv(path_results: Path, value_row: list[float]) -> None:
+    def write_row_in_csv(
+            path_results: Path,
+            value_row: list[float]
+    ) -> None:
         with open(path_results, mode="a", newline="", encoding="utf-8") as file:
             writer = csv.writer(file, delimiter=";", quotechar='"')
             formatted_value_row = [

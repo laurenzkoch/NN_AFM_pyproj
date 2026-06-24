@@ -2,17 +2,8 @@
 from src.modules.data_generating import PARAMETERDICT
 import numpy as np
 from src.modules import data_generating
+from src.config.config_parameter_lists import output_parameters
 
-#list with all output parameters (str)
-output_parameters = [
-    "ShaftTorque",
-    "SystemEfficiency",
-    "ConductorLoss",
-    "MagnetLoss",
-    "StatorIronLoss_Total",
-    "RotorIronLoss_Total",
-    "WedgeLoss",
-]
 
 #data sets for the input parameters
 input_parameters = [
