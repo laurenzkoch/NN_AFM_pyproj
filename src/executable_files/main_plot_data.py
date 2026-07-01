@@ -3,6 +3,7 @@ import src.modules.data_managing as data_managing
 import src.config.config_paths as paths
 from src.config.config_parameter_lists import output_parameters
 import re
+from pathlib import Path
 
 csv_list = list(paths.PATH_DATA_MCAD_RESULTS.glob("*.csv"))
 Plotter = plotting.Plotter()
@@ -21,7 +22,7 @@ for csv_file in csv_list:
 
     parameter_name = str(match.group(1))
 
-    df = DataManager.import_data_from_csv(paths.PATH_DATA_MCAD_RESULTS, str(csv_file))
+    df = DataManager.import_data_from_csv(Path(paths.PATH_DATA_MCAD_RESULTS / "single_parameter_variation"), str(csv_file))
 
     x_df ,y_df = DataManager.split_data(
         data_df=df,

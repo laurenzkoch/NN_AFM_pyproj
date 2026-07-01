@@ -1,6 +1,7 @@
 from pathlib import Path
 import subprocess
 import time
+import os
 
 
 class ProcessManager:
@@ -69,7 +70,8 @@ class ProcessManager:
         raise TimeoutError(f"Process '{executable_name}' did not start within {timeout_seconds} seconds.")
 
 
-    def stop_process(self, process, timeout_seconds: float = 10.0):
+    @staticmethod
+    def stop_process(process, timeout_seconds: float = 10.0):
 
         if process is None:
             return
@@ -77,7 +79,21 @@ class ProcessManager:
         if process.poll() is None:
             try:
                 process.terminate()
-                process.wait(timeout=10)
+                process.wait(timeout=timeout_seconds)
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
+
+
+    @staticmethod
+    def set_number_of_workers(number_of_kernels: int = 4) -> int:
+
+       available_cpus = os.cpu_count()
+       if available_cpus is None:
+           raise RuntimeError("Could not determine the number of CPUs.")
+       if number_of_kernels > available_cpus:
+           print(f"There are not enough CPUs. Number of kernals is set all available CPUs: {available_cpus}.")
+
+       number_of_workers = min(number_of_kernels, available_cpus)
+
+       return number_of_workers
