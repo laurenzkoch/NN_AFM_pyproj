@@ -10,6 +10,9 @@ output_parameters = [
 ]
 
 PARAMETER_LIST = [
+    "TorquePointsPerCycle",
+    "AirgapMeshPoints_layers",
+    "AirgapMeshPoints_mesh",
     "Stator_Lam_Dia",
     "Stator_Bore",
     "Slot_Width",
