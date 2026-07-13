@@ -68,7 +68,9 @@ class SECONDREGRESSION(ml_model_trainig.MLModelTrainer, data_managing.DataManage
         color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
         for model in range(len(models)):
             model_name = train_models_splits[0].iloc[model]["Model"]
-            ax = self.Plotter.add_data_to_plot(ax, splits, [train_models_splits[i].iloc[model]["R^2 Score"] for i in range(len(splits))], colors=color_cycle[model], marker="o", label=model_name)
+            ax = self.Plotter.add_scatter_to_fig(ax, splits, [train_models_splits[i].iloc[model]["R^2 Score"] for i in
+                                                              range(len(splits))], colors=color_cycle[model],
+                                                 marker="o", label=model_name)
         ax.legend(
             loc="lower left",
             bbox_to_anchor=(0.02, 0.02),
@@ -81,14 +83,10 @@ class SECONDREGRESSION(ml_model_trainig.MLModelTrainer, data_managing.DataManage
         color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
         for model in range(len(models)):
             model_name = train_models_splits[0].iloc[model]["Model"]
-            ax = self.Plotter.add_data_to_plot(
-                ax,
-                splits,
-                [train_models_splits[i].iloc[model]["Mean Squared Error"] for i in range(len(splits))],
-                colors=color_cycle[model],
-                marker="o",
-                label=model_name
-            )
+            ax = self.Plotter.add_scatter_to_fig(ax, splits,
+                                                 [train_models_splits[i].iloc[model]["Mean Squared Error"] for i in
+                                                  range(len(splits))], colors=color_cycle[model], marker="o",
+                                                 label=model_name)
 
         ax.legend(
             loc="upper left",
@@ -113,15 +111,15 @@ class SECONDREGRESSION(ml_model_trainig.MLModelTrainer, data_managing.DataManage
 
         for model in models:
             model, x_test, y_test = self.train_model(x, y, test_split=test_split, model=model)
-            trained_and_evaluated_model = self.evaluate_model(model=model, x_test=x_test, y_test=y_test)
+            trained_and_evaluated_model = self.evaluate_model(trained_model=model, x_test=x_test, y_test=y_test)
             for column in x.columns:
                 fig, ax = self.Plotter.create_fig_matplotlib(column, y.columns[0], title=f"Model: {model.__class__.__name__}")
-                ax = self.Plotter.add_data_to_plot(ax, x[column], y.iloc[:,0], colors="b", marker="o", label="Simulated Data")
-                ax = self.Plotter.add_data_to_plot(ax, x_test[column], trained_and_evaluated_model["y_pred"].iloc[0], colors="r", marker="x", label=model.__class__.__name__)
-                ax = self.Plotter.add_text_to_plot(
-                    ax,
-                    text=f"R^2 Score: {trained_and_evaluated_model["R^2 Score"].iloc[0]:.2f}\nMean Squared Error: {trained_and_evaluated_model["Mean Squared Error"].iloc[0]:.2f}\nSplit: {test_split:.2f}",
-                )
+                ax = self.Plotter.add_scatter_to_fig(ax, x[column], y.iloc[:, 0], colors="b", marker="o",
+                                                     label="Simulated Data")
+                ax = self.Plotter.add_scatter_to_fig(ax, x_test[column], trained_and_evaluated_model["y_pred"].iloc[0],
+                                                     colors="r", marker="x", label=model.__class__.__name__)
+                ax = self.Plotter.add_text_to_fig(ax,
+                                                  text=f"R^2 Score: {trained_and_evaluated_model["R^2 Score"].iloc[0]:.2f}\nMean Squared Error: {trained_and_evaluated_model["Mean Squared Error"].iloc[0]:.2f}\nSplit: {test_split:.2f}")
 
                 ax.legend(
                     loc="upper left",

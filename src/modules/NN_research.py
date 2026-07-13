@@ -1,11 +1,11 @@
 from itertools import product
 from typing import Generator
-
+import pandas as pd
+from concurrent.futures import ProcessPoolExecutor
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.neural_network import MLPClassifier
 
-from src.modules.ml_model_trainig import MLModelTrainer
+from src.modules.ml_model_trainig import MLModelTrainer, MLModel
+from src.modules.plotting import Plotter
 
 
 class NNresearch(MLModelTrainer):
@@ -13,42 +13,88 @@ class NNresearch(MLModelTrainer):
     def __init__(self) -> None:
         super().__init__()
 
+    def model_variation(
+            self,
+            max_num_of_layers: int = 3,
+            min_neuron: int = 1,
+            max_neuron: int = 201,
+            neuron_step: int = 15
+    ) -> Generator[Pipeline, None, None]:
+
+        neuron_variation = list(range(min_neuron, max_neuron, neuron_step))
+
+        for number_of_layers in range(1, max_num_of_layers + 1):
+            for layer_neurons in product(neuron_variation, repeat=number_of_layers):
+                yield self.create_model(layer_neurons)
 
     @staticmethod
-    def create_model(layer_neurons: tuple) -> Pipeline:
+    def _func(idx: int, x: pd.DataFrame, y: pd.DataFrame, model: Pipeline, func: str) -> MLModel:
+        trained_model, x_test, y_test = MLModelTrainer.train_model(x=x, y=y, test_split=0.2, model=model)
+        trained_a_evaluated_model = MLModelTrainer.evaluate_model(trained_model=trained_model, x_test=x_test, y_test=y_test)
+        if trained_a_evaluated_model.R2_Score > -0.01:
+            NNresearch.create_plot_of_model(model=trained_a_evaluated_model, x=x, y=y, idx=idx, func=func)
+        return trained_a_evaluated_model
 
-        number_of_neurons_in_hl = layer_neurons
 
-        mlp_classifier = MLPClassifier(
-            hidden_layer_sizes=number_of_neurons_in_hl,
-            activation="relu",
-            solver="adam",
-            alpha=1e-3,
-            learning_rate_init=1e-3,
-            max_iter=1000,
-            early_stopping=True,
-            n_iter_no_change=20,
-            random_state=42
+    def training(
+            self,
+            x: pd.DataFrame,
+            y: pd.DataFrame,
+            num_of_workers: int = 4,
+            max_num_of_layers: int = 3,
+            min_neuron: int = 1,
+            max_neuron: int = 201,
+            neuron_step: int = 15,
+            func: str = "sin"
+    ) -> list[MLModel]:
+
+        model_data: list[MLModel] = []
+
+        with ProcessPoolExecutor(max_workers=num_of_workers) as executor:
+            futures = [
+                executor.submit(
+                    self._func,
+                    idx,
+                    x,
+                    y,
+                    model,
+                    func
+                ) for idx, model in enumerate(
+                    self.model_variation(
+                        max_num_of_layers=max_num_of_layers,
+                        min_neuron=min_neuron,
+                        max_neuron=max_neuron,
+                        neuron_step=neuron_step
+                    ),
+                    start=1
+                )
+            ]
+            for future in futures:
+                future.result()
+                model_data.append(future.result())
+        return model_data
+
+
+    @staticmethod
+    def create_plot_of_model(model: MLModel, x: pd.DataFrame, y: pd.DataFrame, idx: int, func: str) -> None:
+
+        plotter = Plotter()
+
+        fig, ax = plotter.create_fig_matplotlib(
+            xlabel="time [s]",
+            ylabel="y",
+            title=f"Layer Sizes: {model.layer_sizes}"
         )
+        ax = plotter.add_scatter_to_fig(ax=ax, x_column=model.x_test, y_column=model.y_pred, colors="r", label="y_pred")
+        ax = plotter.add_plot_to_fig(ax=ax, x_column=x, y_column=y, colors="b", label="real data")
+        ax = plotter.add_text_to_fig(ax=ax, text=f"R2 Score: {model.R2_Score:.4f}\n"
+                                                 f"Mean Squared Error: {model.Mean_Squared_Error:.4f}\n"
+                                                 f"Score: {model.Score:.4f}\nLayer Sizes: {model.layer_sizes}")
 
-        model = Pipeline([
-            ("scale", StandardScaler()),
-            ("mlp", mlp_classifier)
-        ])
+        plotter.add_legend_to_fig(ax=ax)
 
-        return model
-
-    def model_variation(self) -> Generator[Pipeline, None, None]:
-
-        neuron_variation = [(neurons,) for neurons in range(10, 100, 10)]
-
-        layer_variations = [
-            neuron_variation,
-            [product(*neuron_variation, repeat=2)],
-            [product(*neuron_variation, repeat=3)],
-            [product(*neuron_variation, repeat=4)],
-        ]
-
-        for layers in layer_variations:
-            for layer_neurons in layers:
-                yield self.create_model(layer_neurons)
+        plotter.save_plot(
+            fig=fig,
+            path_plots=f"MLP_{func}",
+            filename=f"{func}_{idx}.png"
+        )

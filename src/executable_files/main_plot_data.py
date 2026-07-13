@@ -37,15 +37,8 @@ for csv_file in csv_list:
             title=f"{y_df.columns[column]} over {parameter_name}",
         )
 
-
-        Plotter.add_data_to_plot(
-            ax=ax,
-            colors="b",
-            marker="o",
-            x_column=x_df[parameter_name],
-            y_column=y_df.iloc[:,column],
-            label="Simulated Data"
-        )
+        Plotter.add_scatter_to_fig(ax=ax, x_column=x_df[parameter_name], y_column=y_df.iloc[:, column], colors="b",
+                                   marker="o", label="Simulated Data")
 
         path_plot = paths.PATH_DATA_PLOTS / "plot_data_sets"
         path_plot.parent.mkdir(exist_ok=True, parents=True)

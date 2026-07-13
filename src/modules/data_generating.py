@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from itertools import product
 from datetime import datetime
+from unittest import case
 from zoneinfo import ZoneInfo
 import math
 from pathlib import Path
@@ -293,15 +294,42 @@ class BasicDataGenerator:
 
     @staticmethod
     def sin_function(t: float) -> float:
-        y = 100 * np.sin(t) * np.exp(-t)
+        y = 100 * np.sin(0.8*t) * np.exp(-t/50)
+        return y
+    @staticmethod
+    def exp_function(t: float) -> float:
+        y = 100 * np.exp(-t/50)
+        return y
+    @staticmethod
+    def linear_function(t: float) -> float:
+        y = 1/50 * t + 10
+        return y
+    @staticmethod
+    def quadratic_function(t: float) -> float:
+        y = 1/50 * t**2 + 10
         return y
 
-    @staticmethod
-    def data_points() -> pd.DataFrame:
-        time = np.arange(0.0, 50, 0.1)
-        y = [BasicDataGenerator.sin_function(t) for t in time]
+
+    def data_points(self, func: str) -> pd.DataFrame:
+        time = np.arange(0.0, 100, 0.1)
+        y: list[float] = []
+
+        match func:
+            case "sin":
+                y = [self.sin_function(t) for t in time]
+            case "exp":
+                y = [self.exp_function(t) for t in time]
+            case "linear":
+                y = [self.linear_function(t) for t in time]
+            case "quadratic":
+                y = [self.quadratic_function(t) for t in time]
+            case _:
+                raise ValueError(f"Function '{func}' is not supported. Please choose 'sin' or 'exp'.")
+
+
         data = pd.DataFrame(
             list(zip(time, y)),
             columns=['time', 'y']
         )
+
         return data
