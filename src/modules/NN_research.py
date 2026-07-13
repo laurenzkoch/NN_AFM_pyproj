@@ -6,6 +6,7 @@ from sklearn.pipeline import Pipeline
 
 from src.modules.ml_model_trainig import MLModelTrainer, MLModel
 from src.modules.plotting import Plotter
+from src.modules.process_managing import ProcessManager
 
 
 class NNresearch(MLModelTrainer):
@@ -49,6 +50,9 @@ class NNresearch(MLModelTrainer):
     ) -> list[MLModel]:
 
         model_data: list[MLModel] = []
+
+        process_manager = ProcessManager()
+        num_of_workers = process_manager.set_number_of_workers(number_of_kernels=num_of_workers)
 
         with ProcessPoolExecutor(max_workers=num_of_workers) as executor:
             futures = [
