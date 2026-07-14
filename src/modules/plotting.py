@@ -124,6 +124,12 @@ class Plotter:
             color=colors,
             label=label
         )
+        ax.grid(
+            True,
+            linestyle="--",
+            linewidth=0.5,
+            alpha=0.5
+        )
 
         return ax
 
@@ -152,10 +158,10 @@ class Plotter:
 
 
     @staticmethod
-    def add_legend_to_fig(ax: Axes) -> Axes:
+    def add_legend_to_fig(ax: Axes, loc: str = "upper left") -> Axes:
         ax.legend(
-            loc="upper left",
-            bbox_to_anchor=(1.02, 1.0),
+            loc=loc,
+            bbox_to_anchor=(1.1, 1.0),
             borderaxespad=0.0
         )
         return ax
@@ -169,7 +175,7 @@ class Plotter:
             columns=data.columns[1],
             values=data.columns[2],
             aggfunc = "mean"
-        ).fillna(0).astype(float)
+        ).interpolate(method='linear').astype(float)
 
         sns.heatmap(
             heatmap_data,
@@ -194,6 +200,6 @@ class Plotter:
     @staticmethod
     def save_plot(fig: Figure, path_plots: str | Path, filename: str):
         path_plots = config_paths.PATH_DATA_PLOTS / path_plots
-        path_plots.mkdir(exist_ok=True)
+        path_plots.mkdir(exist_ok=True, parents=True)
         fig.savefig(path_plots / filename, bbox_inches="tight", dpi=300)
         plt.close(fig)

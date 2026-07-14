@@ -310,8 +310,14 @@ class BasicDataGenerator:
         return y
 
 
-    def data_points(self, func: str) -> pd.DataFrame:
-        time = np.arange(0.0, 100, 0.1)
+    def data_points(
+            self,
+            func: str,
+            time_start: float = 0.0,
+            time_end: float = 100.0,
+            time_step: float = 0.1
+    ) -> pd.DataFrame:
+        time = np.arange(time_start, time_end, time_step)
         y: list[float] = []
 
         match func:

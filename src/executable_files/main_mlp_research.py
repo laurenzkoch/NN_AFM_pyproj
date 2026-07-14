@@ -8,7 +8,7 @@ import pickle
 
 def main():
 
-    output_dir = config_paths.PATH_DATA / "MLP_Research"
+    output_dir = config_paths.PATH_DATA / "MLP_Research" / "Neuron Variation"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     funcs = ["sin", "exp", "linear", "quadratic"]
@@ -19,16 +19,8 @@ def main():
         x, y = data_points[["time"]], data_points[["y"]]
 
         researcher = NNresearch()
-        model_data = researcher.training(
-            x=x,
-            y=y,
-            max_num_of_layers=5,
-            num_of_workers=5,
-            min_neuron=1,
-            max_neuron=350,
-            neuron_step=5,
-            func=func
-        )
+        model_data = researcher.neuron_variation_training(x=x, y=y, num_of_workers=5, max_num_of_layers=2, min_neuron=1,
+                                                          max_neuron=10, neuron_step=2, func=func)
 
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

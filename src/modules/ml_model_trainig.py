@@ -17,16 +17,15 @@ class MLModel:
     layer_sizes: tuple[int, ...]
     y_pred: pd.Series | pd.DataFrame
     x_test: pd.Series | pd.DataFrame
+    computing_time: float = 0.0
 
 class MLModelTrainer:
 
     @staticmethod
-    def create_model(layer_neurons: tuple) -> Pipeline:
-
-        number_of_neurons_in_hl = layer_neurons
+    def create_model(layer_neurons: tuple = (100, 100, 100)) -> Pipeline:
 
         mlp_classifier = MLPRegressor(
-            hidden_layer_sizes=number_of_neurons_in_hl,
+            hidden_layer_sizes=layer_neurons,
             activation="relu",
             solver="adam",
             alpha=0,
