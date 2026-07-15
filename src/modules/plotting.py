@@ -114,7 +114,7 @@ class Plotter:
             ax: Axes,
             x_column: pd.Series | Any,
             y_column: pd.Series | Any,
-            colors: str,
+            colors: str | tuple[float, float, float, float],
             label: str
     ) -> Axes:
 

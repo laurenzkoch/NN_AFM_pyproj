@@ -293,8 +293,12 @@ class BasicDataGenerator:
      return False
 
     @staticmethod
-    def sin_function(t: float) -> float:
+    def sin_exp_function(t: float) -> float:
         y = 100 * np.sin(0.8*t) * np.exp(-t/50)
+        return y
+    @staticmethod
+    def sin_function(t: float) -> float:
+        y = 100 * np.sin(0.8*t)
         return y
     @staticmethod
     def exp_function(t: float) -> float:
@@ -323,6 +327,8 @@ class BasicDataGenerator:
         match func:
             case "sin":
                 y = [self.sin_function(t) for t in time]
+            case "sin_exp":
+                y = [self.sin_exp_function(t) for t in time]
             case "exp":
                 y = [self.exp_function(t) for t in time]
             case "linear":

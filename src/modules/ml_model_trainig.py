@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-
+import time
 import pandas as pd
 from typing import Any, cast
 from sklearn.metrics import mean_squared_error, r2_score
@@ -11,12 +11,22 @@ from sklearn.pipeline import Pipeline
 @dataclass
 class MLModel:
     Model_name: str
-    R2_Score: float
-    Mean_Squared_Error: float
-    Score: float
-    layer_sizes: tuple[int, ...]
-    y_pred: pd.Series | pd.DataFrame
-    x_test: pd.Series | pd.DataFrame
+    Model: Any | None = None
+    layer_sizes: tuple[int, ...] | None = None
+    data_name: str = ""
+    x: pd.Series | pd.DataFrame | None = None
+    y: pd.Series | pd.DataFrame | None = None
+    x_train: pd.Series | pd.DataFrame | None = None
+    y_train: pd.Series | pd.DataFrame | None = None
+    x_test: pd.Series | pd.DataFrame | None = None
+    y_test: pd.Series | pd.DataFrame | None = None
+    y_pred: pd.Series | pd.DataFrame | None = None
+    R2_pred: float | None = None
+    R2_tes_pred: float | None = None
+    R2_train_pred: float | None = None
+    mse: float | None = None
+    mse_train: float | None = None
+    mse_test: float | None = None
     computing_time: float = 0.0
 
 class MLModelTrainer:
@@ -45,12 +55,15 @@ class MLModelTrainer:
 
     @staticmethod
     def train_model(
+            data_name: str,
             x: pd.DataFrame,
             y: pd.DataFrame,
             test_split: float,
             model: Any
-    ) -> tuple[Any, pd.DataFrame, pd.DataFrame]:
-        
+    ) -> MLModel:
+
+        start = time.perf_counter()
+
         x_train, x_test, y_train, y_test = train_test_split(
             x,
             y.iloc[:, 0],
@@ -58,34 +71,40 @@ class MLModelTrainer:
             random_state=42,
             shuffle=True
         )
-        trained_model = model.fit(x_train, y_train)
-        del model, x_train, y_train
 
-        return trained_model, x_test, y_test
+        model = model.fit(x_train, y_train)
 
-    @staticmethod
-    def evaluate_model(
-            trained_model: Any,
-            x_test: pd.DataFrame,
-            y_test: pd.DataFrame
-    ) -> MLModel:
+        y_test_pred = model.predict(x_test)
+        y_train_pred = model.predict(x_train)
+        y_pred = model.predict(x)
 
-        y_pred = trained_model.predict(x_test)
-        r2 = r2_score(y_test, y_pred)
-        mean_squared_error_value = cast(float, mean_squared_error(y_test, y_pred))
-        score = trained_model.score(x_test, y_test)
-        layer_sizes = trained_model.named_steps["mlp"].hidden_layer_sizes
+        r2_test_pred = r2_score(y_test, y_test_pred)
+        r2_train_pred = r2_score(y_train, y_train_pred)
+        r2_pred = r2_score(y, y_pred)
 
-        trained_and_evaluated_model = MLModel(
-            Model_name=trained_model.__class__.__name__,
-            R2_Score=r2,
-            Mean_Squared_Error=mean_squared_error_value,
-            Score=score,
-            layer_sizes=layer_sizes,
+        mse_test = cast(float, mean_squared_error(y_test, y_test_pred))
+        mse_train = cast(float, mean_squared_error(y_train, y_train_pred))
+        mse = cast(float, mean_squared_error(y, y_pred))
+
+        trained_model = MLModel(
+            Model_name=model.__class__.__name__,
+            Model=model,
+            layer_sizes=model.named_steps["mlp"].hidden_layer_sizes,
+            data_name=data_name,
+            x=x,
+            y=y,
+            x_train=x_train,
+            y_train=y_train,
+            x_test=x_test,
+            y_test=y_test,
             y_pred=y_pred,
-            x_test=x_test
+            R2_pred=r2_pred,
+            R2_tes_pred=r2_test_pred,
+            R2_train_pred=r2_train_pred,
+            mse=mse,
+            mse_train=mse_train,
+            mse_test=mse_test,
+            computing_time=time.perf_counter() - start
         )
 
-        del trained_model
-
-        return trained_and_evaluated_model
+        return trained_model

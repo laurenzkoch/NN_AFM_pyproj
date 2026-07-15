@@ -1,5 +1,6 @@
 
 import pandas as pd
+from matplotlib import pyplot as plt
 
 from modules.ml_model_trainig import MLModel
 from src.modules.plotting import Plotter
@@ -30,9 +31,16 @@ def main():
     )
     ax3_1 = ax3.twinx()
 
-    colors = ["b", "g", "r", "c"]
+    colors = ["b", "g", "r", "c", "m", ]
+    func = ""
+    layer_sizes = ""
 
-    for file, color in zip(folder.glob("*.pkl"), colors):
+    files = sorted(folder.glob(".pkl"))
+    n_files = len(files)
+    cmap = plt.get_cmap("hsv")
+    colors = [cmap(i / max(1, n_files - 1)) for i in range(n_files)]
+
+    for file, color in zip(files, colors):
 
         with open(Path(config_paths.PATH_DATA / file), "rb") as f:
             model_data: list[MLModel] = pickle.load(f)
@@ -49,6 +57,9 @@ def main():
             number_of_data_points = len(model.x_test) / 0.2 * 0.8
             computing_time = model.computing_time
             r2_score = model.R2_Score
+            func = model.function
+            layer_sizes = model.layer_sizes
+
 
             results = pd.concat(
                 [
@@ -57,6 +68,8 @@ def main():
                         "Number of data points": [number_of_data_points],
                         "computing time": [computing_time],
                         "R2": [r2_score],
+                        "func": [func],
+                        "layer_sizes": [layer_sizes],
                     })
                 ],
                 ignore_index=True
@@ -67,14 +80,14 @@ def main():
             x_column=results["Number of data points"],
             y_column=results["R2"],
             colors=color,
-            label=file.stem
+            label=f"{func} {layer_sizes}"
         )
         plotter.add_plot_to_fig(
             ax=ax2,
             x_column=results["Number of data points"],
             y_column=results["computing time"],
             colors=color,
-            label=file.stem
+            label=f"{func} {layer_sizes}"
         )
         if file.stem == "model_data_20260714_212600":
             ax3 =  plotter.add_plot_to_fig(

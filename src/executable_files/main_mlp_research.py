@@ -11,7 +11,7 @@ def main():
     output_dir = config_paths.PATH_DATA / "MLP_Research" / "Neuron Variation"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    funcs = ["sin", "exp", "linear", "quadratic"]
+    funcs = ["sin_exp", "sin", "exp", "linear", "quadratic"]
     basic_data_generator = BasicDataGenerator()
 
     for func in funcs:
