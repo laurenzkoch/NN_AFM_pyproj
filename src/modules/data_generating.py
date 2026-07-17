@@ -319,9 +319,9 @@ class BasicDataGenerator:
             func: str,
             time_start: float = 0.0,
             time_end: float = 100.0,
-            time_step: float = 0.1
+            number_of_data_points: float = 100
     ) -> pd.DataFrame:
-        time = np.arange(time_start, time_end, time_step)
+        time = np.arange(time_start, time_end, (time_end-time_start) / number_of_data_points)
         y: list[float] = []
 
         match func:

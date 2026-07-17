@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import time
 import pandas as pd
 from typing import Any, cast
@@ -12,17 +12,17 @@ from sklearn.pipeline import Pipeline
 class MLModel:
     Model_name: str
     Model: Any | None = None
-    layer_sizes: tuple[int, ...] | None = None
+    layer_sizes: tuple[int, ...] = ()
     data_name: str = ""
-    x: pd.Series | pd.DataFrame | None = None
-    y: pd.Series | pd.DataFrame | None = None
-    x_train: pd.Series | pd.DataFrame | None = None
-    y_train: pd.Series | pd.DataFrame | None = None
-    x_test: pd.Series | pd.DataFrame | None = None
-    y_test: pd.Series | pd.DataFrame | None = None
-    y_pred: pd.Series | pd.DataFrame | None = None
+    x: pd.Series | pd.DataFrame = field(default_factory=pd.DataFrame())
+    y: pd.Series | pd.DataFrame = field(default_factory=pd.DataFrame())
+    x_train: pd.Series | pd.DataFrame = field(default_factory=pd.DataFrame())
+    y_train: pd.Series | pd.DataFrame = field(default_factory=pd.DataFrame())
+    x_test: pd.Series | pd.DataFrame = field(default_factory=pd.DataFrame())
+    y_test: pd.Series | pd.DataFrame = field(default_factory=pd.DataFrame())
+    y_pred: pd.Series | pd.DataFrame = field(default_factory=pd.DataFrame())
     R2_pred: float | None = None
-    R2_tes_pred: float | None = None
+    R2_test_pred: float | None = None
     R2_train_pred: float | None = None
     mse: float | None = None
     mse_train: float | None = None
@@ -99,7 +99,7 @@ class MLModelTrainer:
             y_test=y_test,
             y_pred=y_pred,
             R2_pred=r2_pred,
-            R2_tes_pred=r2_test_pred,
+            R2_test_pred=r2_test_pred,
             R2_train_pred=r2_train_pred,
             mse=mse,
             mse_train=mse_train,

@@ -11,7 +11,7 @@ from pathlib import Path
 
 def main():
 
-    folder = config_paths.PATH_DATA / "MLP_Research" / "Quantity of training data"
+    folder = config_paths.PATH_DATA / "MLP_Research" / "Pickel_files"
     plotter = Plotter()
 
     fig1, ax1 = plotter.create_fig_matplotlib(

@@ -1,5 +1,5 @@
 from typing import Any
-
+from collections.abc import Sequence
 import plotly.express as px
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
@@ -114,8 +114,8 @@ class Plotter:
             ax: Axes,
             x_column: pd.Series | Any,
             y_column: pd.Series | Any,
-            colors: str | tuple[float, float, float, float],
-            label: str
+            colors: str | tuple[float, float, float, float] = "r",
+            label: str = ""
     ) -> Axes:
 
         ax.plot(
@@ -137,12 +137,14 @@ class Plotter:
     @staticmethod
     def add_text_to_fig(
             ax: Axes,
-            text: str
+            text: str,
+            x: float = 1.1,
+            y: float = 0.8,
     ) -> Axes:
 
         ax.text(
-            x=1.02,
-            y=0.8,
+            x=x,
+            y=y,
             s=text,
             transform=ax.transAxes,
             fontsize=10,
@@ -168,32 +170,69 @@ class Plotter:
 
 
     @staticmethod
-    def add_heatmap_to_fig(ax: Axes, data: pd.DataFrame, title: str) -> Axes:
+    def add_heatmap_to_fig(
+            ax: Axes,
+            label_x: str,
+            label_y: str,
+            label_z: str,
+            x: pd.Series | Sequence[Any],
+            y: pd.Series | Sequence[Any],
+            z: pd.Series | Sequence[float],
+            title: str
+    ) -> Axes:
+
+        data = pd.DataFrame({
+            "x": x,
+            "y": y,
+            "z": z
+        })
 
         heatmap_data = data.pivot_table(
-            index=data.columns[0],
-            columns=data.columns[1],
-            values=data.columns[2],
-            aggfunc = "mean"
-        ).interpolate(method='linear').astype(float)
+            index="y",
+            columns="x",
+            values="z",
+            aggfunc="mean"
+        ).astype(float)
+
+        heatmap_data = (
+            heatmap_data
+            .interpolate(
+                method="linear",
+                axis=0,
+                limit_direction="both"
+            )
+            .interpolate(
+                method="linear",
+                axis=1,
+                limit_direction="both"
+            )
+        )
 
         sns.heatmap(
             heatmap_data,
-            annot=False,  # Zahlen in den Zellen anzeigen
-            fmt=".2f",  # Zahlenformat
-            cmap="viridis",  # Farbpalette
-            linewidths=0.0,  # Linien zwischen den Zellen
+            annot=False,
+            fmt=".2f",
+            cmap="viridis",
+            linewidths=0.0,
             linecolor="black",
-            cbar_kws={"label": "R^2"},
+            cbar_kws={"label": label_z},
             ax=ax
+        )
+        ax.set_xticklabels(
+            [
+                f"{float(label.get_text()):.2f}".rstrip("0").rstrip(".")
+                for label in ax.get_xticklabels()
+            ],
+            rotation=90
         )
 
         ax.invert_yaxis()
         ax.set_title(title)
-        ax.set_xlabel(data.columns[1])
-        ax.set_ylabel(data.columns[0])
+        ax.set_xlabel(label_x)
+        ax.set_ylabel(label_y)
 
-        plt.tight_layout()
+        ax.figure.tight_layout()
+
         return ax
 
 
