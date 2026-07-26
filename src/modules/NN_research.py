@@ -113,7 +113,7 @@ class NNresearch(MLModelTrainer):
         )
         trained_model.Model = None
 
-        output_dir = config_paths.PATH_DATA / "MLP_Research" / "Pickel_files"
+        output_dir = config_paths.PATH_DATA_MLP_RESEARCH_BASIC
         output_dir.mkdir(parents=True, exist_ok=True)
 
         if trained_model.x_train is None:
@@ -122,56 +122,3 @@ class NNresearch(MLModelTrainer):
         pkl_file = output_dir / f"model_data_{data_name}_{trained_model.layer_sizes}_{len(trained_model.x_train)}.pkl"
         with open(pkl_file, "wb") as f:
             pickle.dump(trained_model, f, protocol=pickle.HIGHEST_PROTOCOL)
-
-
-
-
-
-
-    # @staticmethod
-    # def create_plot_of_model(model: MLModel, x: pd.DataFrame, y: pd.DataFrame, idx: int, func: str, variation_type: str) -> None:
-    #
-    #     plotter = Plotter()
-    #
-    #     match func:
-    #         case "sin_exp":
-    #             function = "100 * sin(0.8 * t) * exp(-t/50)"
-    #         case "sin":
-    #             function = "100 * sin(0.8 * t)"
-    #         case "exp":
-    #             function = "100 * exp(-t/50)"
-    #         case "linear":
-    #             function = "1/50 * t + 10"
-    #         case "quadratic":
-    #             function = "1/50 * t^2 + 10"
-    #         case _:
-    #             function = ""
-    #
-    #     fig, ax = plotter.create_fig_matplotlib(
-    #         xlabel="time [s]",
-    #         ylabel="y",
-    #         title=f"{variation_type}"
-    #     )
-    #     ax = plotter.add_scatter_to_fig(ax=ax, x_column=model.x_test, y_column=model.y_pred, colors="r", label="y_pred")
-    #     ax = plotter.add_plot_to_fig(ax=ax, x_column=x, y_column=y, colors="b", label="real data")
-    #     ax = plotter.add_text_to_fig(
-    #         ax=ax,
-    #         text=f"R2 Score: {model.R2_Score:.4f}\n"
-    #              f"Mean Squared Error: {model.Mean_Squared_Error:.4f}\n"
-    #              f"Score: {model.Score:.4f}\n"
-    #              f"Layer Sizes: {model.layer_sizes}\n"
-    #              f"Split: 0.20\n"
-    #              f"Quantity of training points: {int(len(x) * 0.8)}\n"
-    #              f"Function: {function}\n"
-    #              f"Computing Time: {model.computing_time:.4f} s",
-    #
-    #     )
-    #
-    #     plotter.add_legend_to_fig(ax=ax)
-    #
-    #     plotter.save_plot(
-    #         fig=fig,
-    #         path_plots=Path(f"MLP_{variation_type}") / f"MLP_{func}_{model.layer_sizes}",
-    #         filename=f"{func}_{idx}.png"
-    #     )
-

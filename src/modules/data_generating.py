@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from itertools import product
 from datetime import datetime
-from unittest import case
 from zoneinfo import ZoneInfo
 import math
 from pathlib import Path
@@ -21,6 +20,9 @@ class PARAMETERDICT:
     variable_name_1: str = ""
     variable_name_2: str = "default"
     variable_name_3: str = "default"
+    variable_config_1: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    variable_config_2: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    variable_config_3: tuple[float, float, float] = (0.0, 0.0, 0.0)
     value_list_1: list[float] = field(default_factory=list)
     value_list_2: list[float] = field(default_factory=list)
     value_list_3: list[float] = field(default_factory=list)
@@ -130,6 +132,7 @@ class MCADDataGenerator:
             print("Warning: Magnet length is less than 0")
             return False
 
+
         return True
 
     @staticmethod
@@ -187,7 +190,7 @@ class MCADDataGenerator:
         with mcad_processing.MCADProcessor() as mcad:
 
             copy_base_file = datamanager.create_temp_file_copy(Path(config_paths.PATH_MCAD_DATA / base_filename))
-            mcad.open_motorcad_file(filename=copy_base_file.name)
+            mcad.open_motorcad_file(file_path=copy_base_file)
 
             with tempfile.NamedTemporaryFile(
                     dir=temp_folder_path,
@@ -197,9 +200,15 @@ class MCADDataGenerator:
             ) as temp_file:
                 temp_csv_path = Path(temp_file.name)
 
+
+
             for value_tuple in chunk:
 
-                mcad.set_value_in_mcad(parameter.variable_name_1, value_tuple[0])
+                if parameter.variable_name_1 == "Machine_dia":
+                    mcad.set_value_in_mcad(variable_name="Stator_Lam_Dia", value=value_tuple[0])
+                    mcad.set_value_in_mcad(variable_name="AFM_D_Rotor", value=value_tuple[0])
+                else:
+                    mcad.set_value_in_mcad(parameter.variable_name_1, value_tuple[0])
                 if parameter.variable_name_2 != "default":
                     mcad.set_value_in_mcad(parameter.variable_name_2, value_tuple[1])
                 if parameter.variable_name_3 != "default":
@@ -235,11 +244,25 @@ class MCADDataGenerator:
 
         single_parameter_variation = True
 
+        parameter.value_list_1 = np.arange(parameter.variable_config_1[0], parameter.variable_config_1[1],
+                                           (parameter.variable_config_1[1] - parameter.variable_config_1[0]) /
+                                           parameter.variable_config_1[2]).tolist()
+
+
         if parameter.variable_name_2 != "default" and parameter.variable_name_3 != "default":
             single_parameter_variation = False
+            parameter.value_list_2 = np.arange(parameter.variable_config_2[0], parameter.variable_config_2[1],
+                                               (parameter.variable_config_2[1] - parameter.variable_config_2[0]) /
+                                               parameter.variable_config_2[2]).tolist()
+            parameter.value_list_3 = np.arange(parameter.variable_config_3[0], parameter.variable_config_3[1],
+                                               (parameter.variable_config_3[1] - parameter.variable_config_3[0]) /
+                                               parameter.variable_config_3[2]).tolist()
             value_list = list(product(parameter.value_list_1, parameter.value_list_2, parameter.value_list_3))
         elif parameter.variable_name_2 != "default" and parameter.variable_name_3 == "default":
             single_parameter_variation = False
+            parameter.value_list_2 = np.arange(parameter.variable_config_2[0], parameter.variable_config_2[1],
+                                               (parameter.variable_config_2[1] - parameter.variable_config_2[0]) /
+                                               parameter.variable_config_2[2]).tolist()
             value_list = list(product(parameter.value_list_1, parameter.value_list_2))
         else:
             value_list = list(zip(parameter.value_list_1))
@@ -268,7 +291,6 @@ class MCADDataGenerator:
             ]
             for future in futures:
                 future.result()
-        self.datamanager.delete_folder(config_paths.PATH_MCAD_DATA / config_paths.PATH_TEMP_FILES)
 
 
         csv_path = self.create_csv_path(path_folder_results, parameter, single_parameter_variation)
@@ -281,6 +303,7 @@ class MCADDataGenerator:
             output_file=csv_path,
         )
         self.datamanager.delete_folder(path_temp_folder)
+        self.datamanager.delete_folder(config_paths.PATH_MCAD_DATA / config_paths.PATH_TEMP_FILES)
 
 
 class BasicDataGenerator:

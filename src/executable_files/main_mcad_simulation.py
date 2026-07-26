@@ -1,7 +1,8 @@
+from math import sqrt
+
 from config import config_paths
 from modules import process_managing
 from src.modules.data_generating import PARAMETERDICT
-import numpy as np
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -14,7 +15,7 @@ def main() -> None:
     #data sets for the input parameters
     input_parameters = [
 
-        PARAMETERDICT(variable_name_1="TorquePointsPerCycle", value_list_1=np.arange(5, 100, 5).tolist())
+        #PARAMETERDICT(variable_name_1="TorquePointsPerCycle", value_list_1=np.arange(5, 100, 5).tolist())
 
         #PARAMETERDICT(variable_name_1= "PeakCurrent",         value_list_1=np.arange(0, 100, 5).tolist()),
         #PARAMETERDICT(variable_name_1= "PhaseAdvance",        value_list_1=np.arange(0, 200, 100).tolist()),
@@ -39,11 +40,15 @@ def main() -> None:
         #      value_list_2=np.arange(50, 500, 25).tolist(),
         #      value_list_3=np.arange(5, 250, 5).tolist()
         # ),
+        PARAMETERDICT(
+            variable_name_1="PeakCurrent",
+            variable_name_2="PhaseAdvance",
+            variable_config_1=(0.0, 350, sqrt(1000)),
+            variable_config_2=(0.0, 200, sqrt(1000)),
+        ),
         # PARAMETERDICT(
-        #     variable_name_1="PeakCurrent",
-        #     variable_name_2="PhaseAdvance",
-        #     value_list_1=np.arange(0, 100, 5).tolist(),
-        #     value_list_2=np.arange(0, 180, 2).tolist()
+        #     variable_name_1="Machine_dia",
+        #     variable_config_1=(100, 500, 100),
         # ),
         # PARAMETERDICT(
         #     variable_name_1="Slot_Number",

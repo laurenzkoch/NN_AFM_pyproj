@@ -10,7 +10,7 @@ import pickle
 
 def main():
 
-    folder = config_paths.PATH_DATA / "MLP_Research" / "Pickel_files"
+    folder = config_paths.PATH_DATA_MLP_RESEARCH_BASIC
     files = sorted(folder.glob("*.pkl"), key=lambda x: int(x.stem.split('_')[-1]))
 
     models_data_quantity_sin_exp: list[MLModel] = []
@@ -150,7 +150,7 @@ def main():
                                   filename=f"result_plot_{r2_name}_{key}.png")
 
     plotter.add_legend_to_fig(ax2)
-    plotter.save_plot(fig2, path_plots=Path("MLP_research"), filename=f"result_plot_computing_time.png")
+    plotter.save_plot(fig2, path_plots=Path("MLP_Research_basic_data"), filename=f"result_plot_computing_time.png")
 
 if __name__ == "__main__":
     main()

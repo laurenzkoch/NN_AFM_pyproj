@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 
 from src.modules import process_managing
 import ansys.motorcad.core as pymotorcad
@@ -27,8 +28,8 @@ class MCADProcessor(process_managing.ProcessManager):
             pass
 
 
-    def open_motorcad_file(self, filename: str = "base_first_data.mot") -> None:
-       file_path = config_paths.PATH_MCAD_DATA / filename
+    def open_motorcad_file(self, file_path: str | Path = "base_first_data.mot") -> None:
+       file_path = Path(file_path)
        if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 

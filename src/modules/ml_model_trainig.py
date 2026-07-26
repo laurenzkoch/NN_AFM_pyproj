@@ -21,6 +21,15 @@ class MLModel:
     x_test: pd.Series | pd.DataFrame = field(default_factory=pd.DataFrame())
     y_test: pd.Series | pd.DataFrame = field(default_factory=pd.DataFrame())
     y_pred: pd.Series | pd.DataFrame = field(default_factory=pd.DataFrame())
+    split: float = 0.2
+    activation: str = "relu"
+    solver: str = "adam"
+    alpha: float = 0.0
+    learning_rate_init: float = 1e-3
+    max_iter: int = 5000
+    early_stopping: bool = True
+    n_iter_no_change: int = 50
+    random_state: int = 42
     R2_pred: float | None = None
     R2_test_pred: float | None = None
     R2_train_pred: float | None = None
@@ -34,7 +43,7 @@ class MLModelTrainer:
     @staticmethod
     def create_model(layer_neurons: tuple = (100, 100, 100)) -> Pipeline:
 
-        mlp_classifier = MLPRegressor(
+        mlp_regressor = MLPRegressor(
             hidden_layer_sizes=layer_neurons,
             activation="relu",
             solver="adam",
@@ -48,7 +57,7 @@ class MLModelTrainer:
 
         model = Pipeline([
             ("scale", StandardScaler()),
-            ("mlp", mlp_classifier)
+            ("mlp", mlp_regressor)
         ])
 
         return model
@@ -66,7 +75,7 @@ class MLModelTrainer:
 
         x_train, x_test, y_train, y_test = train_test_split(
             x,
-            y.iloc[:, 0],
+            y.iloc[:, :],
             test_size=test_split,
             random_state=42,
             shuffle=True
@@ -74,9 +83,9 @@ class MLModelTrainer:
 
         model = model.fit(x_train, y_train)
 
-        y_test_pred = model.predict(x_test)
-        y_train_pred = model.predict(x_train)
-        y_pred = model.predict(x)
+        y_test_pred = pd.DataFrame(model.predict(x_test), columns=y.columns, index=x_test.index)
+        y_train_pred = pd.DataFrame(model.predict(x_train), columns=y.columns, index=x_train.index)
+        y_pred = pd.DataFrame(model.predict(x), columns=y.columns, index=x.index)
 
         r2_test_pred = r2_score(y_test, y_test_pred)
         r2_train_pred = r2_score(y_train, y_train_pred)

@@ -8,6 +8,8 @@ import pandas as pd
 from pathlib import Path
 from matplotlib.figure import Figure
 import seaborn as sns
+from matplotlib.colors import LogNorm
+import numpy as np
 
 
 class Plotter:
@@ -168,7 +170,6 @@ class Plotter:
         )
         return ax
 
-
     @staticmethod
     def add_heatmap_to_fig(
             ax: Axes,
@@ -178,7 +179,8 @@ class Plotter:
             x: pd.Series | Sequence[Any],
             y: pd.Series | Sequence[Any],
             z: pd.Series | Sequence[float],
-            title: str
+            title: str,
+            log_scale: bool = False,
     ) -> Axes:
 
         data = pd.DataFrame({
@@ -207,23 +209,56 @@ class Plotter:
                 limit_direction="both"
             )
         )
+        vmin = 0
+        vmax = 1
+        if log_scale:
+
+            positive_values = heatmap_data.to_numpy()
+            positive_values = positive_values[
+                np.isfinite(positive_values) & (positive_values > 0)
+                ]
+
+            if positive_values.size == 0:
+                raise ValueError(
+                    "Für eine logarithmische Farbskala muss mindestens "
+                    "ein positiver z-Wert vorhanden sein."
+                )
+
+            vmin = positive_values.min()
+            vmax = positive_values.max()
+            heatmap_data = heatmap_data.mask(heatmap_data <= 0)
 
         sns.heatmap(
             heatmap_data,
             annot=False,
             fmt=".2f",
             cmap="viridis",
+            norm=LogNorm(
+                vmin=vmin,
+                vmax=vmax
+            ) if log_scale else None,
             linewidths=0.0,
             linecolor="black",
-            cbar_kws={"label": label_z},
+            cbar_kws={
+                "label": label_z
+            },
             ax=ax
         )
+
         ax.set_xticklabels(
             [
                 f"{float(label.get_text()):.2f}".rstrip("0").rstrip(".")
                 for label in ax.get_xticklabels()
             ],
             rotation=90
+        )
+
+        ax.set_yticklabels(
+            [
+                f"{float(label.get_text()):.2f}".rstrip("0").rstrip(".")
+                for label in ax.get_yticklabels()
+            ],
+            rotation=0
         )
 
         ax.invert_yaxis()
