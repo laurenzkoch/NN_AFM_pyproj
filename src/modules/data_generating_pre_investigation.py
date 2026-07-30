@@ -2,7 +2,6 @@ from dataclasses import dataclass, field
 from itertools import product
 from datetime import datetime
 from zoneinfo import ZoneInfo
-import math
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
 import tempfile
@@ -30,7 +29,7 @@ class PARAMETERDICT:
 
 class MCADDataGenerator:
 
-    parameter_list = config_parameter_lists.PARAMETER_LIST
+    parameter_list = config_parameter_lists.INPUT_NEURON_LIST
 
     def __init__(self):
         self.processmanager = process_managing.ProcessManager()
@@ -42,98 +41,7 @@ class MCADDataGenerator:
     def __exit__(self, exc_type, exc_val, exc_tb):
         return False
 
-    @staticmethod
-    def test_boundary_conditions(parameter_list: list[str], values: list[float]) -> bool:
 
-        keys = parameter_list
-
-        if len(keys) != len(values):
-            raise ValueError("Anzahl der keys stimmt nicht mit Anzahl der values überein")
-
-        parameter_dict = {
-            k: float(v)
-            for k, v in zip(keys, values)
-        }
-
-        #radial - stator
-        stator_lam_dia = parameter_dict["Stator_Lam_Dia"]
-        stator_bore = parameter_dict["Stator_Bore"]
-        slot_width = parameter_dict["Slot_Width"]
-
-        #radial - rotor
-        afm_d_rotor = parameter_dict["AFM_D_Rotor"]
-        shaft_dia = parameter_dict["Shaft_Dia"]
-        shaft_hole_diameter = parameter_dict["Shaft_Hole_Diameter"]
-        magnet_embed_depth = parameter_dict["Magnet_Embed_Depth"]
-        magnet_thickness = parameter_dict["Magnet_Thickness"]
-
-        #axial
-        motor_length = parameter_dict["Motor_Length"]
-        stator_lam_length = parameter_dict["Stator_Lam_Length"]
-        slot_depth = parameter_dict["Slot_Depth"]
-        rotor_lam_length = parameter_dict["Rotor_Lam_Length"]
-        magnet_length = parameter_dict["Magnet_Length"]
-
-        #winding
-        slot_number = int(parameter_dict["Slot_Number"])
-        pole_number = int(parameter_dict["Pole_Number"])
-        airgap = parameter_dict["Airgap"]
-        magphases = int(parameter_dict["MagPhases"])
-
-        dia_mag_i = (afm_d_rotor - 2 * magnet_embed_depth - 2 * magnet_thickness)
-        dia_mag_a = (afm_d_rotor - 2 * magnet_embed_depth)
-        activ_length = min(stator_lam_dia, dia_mag_a) - max(stator_bore, dia_mag_i)
-        mean_dia_of_mag_length = (dia_mag_a + dia_mag_i) / 2
-        stator_width_per_slot = math.pi * mean_dia_of_mag_length / slot_number
-        winding_gcd = math.gcd(slot_number, pole_number)
-        winding_denominator = magphases * winding_gcd
-        winding_ratio = slot_number / winding_denominator
-
-
-        #radial - stator
-        if stator_bore >= stator_lam_dia:
-            print("Warning: Stator bore is greater than stator lamination diameter.")
-            return False
-        if stator_bore <= shaft_dia:
-            print("Warning: Stator bore is less than shaft diameter.")
-            return False
-        #radial - rotor
-        if dia_mag_i  <= shaft_dia:
-            print("Warning: Magnets too thick for rotor diameter or rotor diameter is less than shaft diameter.")
-            return False
-        if shaft_hole_diameter >= stator_lam_dia:
-            print("Warning: Shaft hole diameter is greater than stator lamination diameter.")
-            return False
-
-        #axial
-        if motor_length <= (2 * (stator_lam_length + airgap + magnet_length) + rotor_lam_length):
-            print(f"Warning: Motor length is too short.")
-            return False
-        if slot_depth >= stator_lam_length:
-            print("Warning: Slot depth is greater than stator lamination length.")
-            return False
-
-        #winding
-        if not winding_ratio.is_integer() or winding_ratio < 1:
-            print(
-                "Warning: Winding is not feasible. "
-                f"Slot_Number / MagPhases / gcd(Pole_Number, Slot_Number) = "
-                f"{slot_number} / {magphases} / {winding_gcd} = {winding_ratio:.6f}."
-            )
-            return False
-
-        if slot_width >= stator_width_per_slot:
-            print("Warning: Slot width is greater than stator width per slot.")
-            return False
-
-
-        #magnet length
-        if activ_length <= 0:
-            print("Warning: Magnet length is less than 0")
-            return False
-
-
-        return True
 
     @staticmethod
     def create_csv_path(path_folder_results: Path, parameter_dict: PARAMETERDICT, variation_type: bool = True) -> Path:
@@ -166,7 +74,7 @@ class MCADDataGenerator:
 
         value_row = get_values(input_parameters)
 
-        if MCADDataGenerator.test_boundary_conditions(input_parameters, value_row):
+        if mcad_processor.test_boundary_conditions(input_parameters, value_row):
             if mcad_processor.do_calculation():
                 value_row.extend(
                     get_values(output_parameters)
@@ -271,8 +179,8 @@ class MCADDataGenerator:
         num_of_workers = min(self.processmanager.set_number_of_workers(number_of_kernels=config_process.num_kernel), max_progress_steps)
         value_chunks = self.datamanager.split_chunks(values=value_list, number_of_chunks=num_of_workers)
 
-        path_temp_folder = Path(config_paths.PATH_DATA_MCAD_RESULTS / "temp_csv")
-        path_temp_folder.mkdir(exist_ok=True)
+        path_temp_csv_folder = Path(config_paths.PATH_DATA_MCAD_RESULTS / "temp_csv")
+        path_temp_csv_folder.mkdir(exist_ok=True)
 
         print(f"--------- Executing {max_progress_steps} simulations. Some might be dropped ------------")
 
@@ -284,7 +192,7 @@ class MCADDataGenerator:
                     parameter,
                     self.parameter_list,
                     output_parameters,
-                    path_temp_folder,
+                    path_temp_csv_folder,
                     base_filename,
                     self.datamanager
                 ) for value_chunk in value_chunks
@@ -299,10 +207,10 @@ class MCADDataGenerator:
             columns_list=self.parameter_list + output_parameters
         )
         self.datamanager.write_from_csv_in_csv(
-            input_folder=path_temp_folder,
+            input_folder=path_temp_csv_folder,
             output_file=csv_path,
         )
-        self.datamanager.delete_folder(path_temp_folder)
+        self.datamanager.delete_folder(path_temp_csv_folder)
         self.datamanager.delete_folder(config_paths.PATH_MCAD_DATA / config_paths.PATH_TEMP_FILES)
 
 

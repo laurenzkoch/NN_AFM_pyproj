@@ -2,12 +2,12 @@ from math import sqrt
 
 from config import config_paths
 from modules import process_managing
-from src.modules.data_generating import PARAMETERDICT
+from src.modules.data_generating_pre_investigation import PARAMETERDICT
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from src.modules import data_generating
-from src.config.config_parameter_lists import output_parameters
+from src.modules import data_generating_pre_investigation
+from src.config.config_parameter_lists import OUTPUT_NEURON_LIST
 
 
 def main() -> None:
@@ -85,7 +85,7 @@ def main() -> None:
     print("-----------Starting eduVPN----------")
     eduvpn_process = processmanager.start_process(config_paths.PATH_eduVPN_EXE)
 
-    with data_generating.MCADDataGenerator() as data_generator:
+    with data_generating_pre_investigation.MCADDataGenerator() as data_generator:
         print(f"--------- Starting {len(input_parameters)} parameter variation ------------")
 
         current_time = datetime.now(ZoneInfo("Europe/Berlin")).strftime("%d.%m.%Y_%H-%M-%S")
@@ -93,7 +93,7 @@ def main() -> None:
         result_folder_path.mkdir(exist_ok=True)
 
         for pardi_j in input_parameters:
-            data_generator.parameter_variation(path_folder_results=result_folder_path, parameter=pardi_j, output_parameters=output_parameters)
+            data_generator.parameter_variation(path_folder_results=result_folder_path, parameter=pardi_j, output_parameters=OUTPUT_NEURON_LIST)
 
         print("---------FINISHED------------")
 

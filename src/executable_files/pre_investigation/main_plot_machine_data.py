@@ -1,6 +1,6 @@
 from src.modules.data_managing import DataManager
 from src.config import config_paths
-from src.config.config_parameter_lists import output_parameters
+from src.config.config_parameter_lists import OUTPUT_NEURON_LIST
 from src.modules.plotting import Plotter
 
 def main():
@@ -10,7 +10,7 @@ def main():
         path_data=config_paths.PATH_DATA_MCAD_RESULTS / "results",
         filename="Results_EMagnetic_simulation_PeakCurrent_PhaseAdvance_17.07.2026_16-29-43_CEST.csv"
     )
-    x, y = data_manager.split_data(data_df=data, number_of_outputs=len(output_parameters))
+    x, y = data_manager.split_data(data_df=data, number_of_outputs=len(OUTPUT_NEURON_LIST))
 
     y["SystemEfficiency"] = y["SystemEfficiency"].clip(upper=100)
 

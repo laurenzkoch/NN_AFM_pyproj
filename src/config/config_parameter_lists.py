@@ -1,21 +1,20 @@
 #list with all output parameters (str)
-output_parameters = [
+OUTPUT_NEURON_LIST = [
     "ShaftTorque",
     "SystemEfficiency",
     "ConductorLoss",
     "MagnetLoss",
     "StatorIronLoss_Total",
     "RotorIronLoss_Total",
-    "WedgeLoss",
+    #"WedgeLoss",
 ]
 
-PARAMETER_LIST = [
-    "TorquePointsPerCycle",
-    "AirgapMeshPoints_layers",
-    "AirgapMeshPoints_mesh",
+INPUT_NEURON_LIST = [
+    #"TorquePointsPerCycle",
+    #"AirgapMeshPoints_layers",
+    #"AirgapMeshPoints_mesh",
     "Stator_Lam_Dia",
     "Stator_Bore",
-    "Slot_Width",
     "AFM_D_Rotor",
     "Shaft_Dia",
     "Shaft_Hole_Diameter",
@@ -23,13 +22,17 @@ PARAMETER_LIST = [
     "Magnet_Thickness",
     "Motor_Length",
     "Stator_Lam_Length",
-    "Slot_Depth",
     "Rotor_Lam_Length",
+    "Airgap",
     "Magnet_Length",
+    "Tooth_Tip_Depth",
+    "Slot_Opening",
+    "Slot_Depth",
+    "Slot_Width",
     "Slot_Number",
     "Pole_Number",
-    "Airgap",
     "MagPhases",
     "PeakCurrent",
+    "ShaftSpeed",
     "PhaseAdvance",
 ]

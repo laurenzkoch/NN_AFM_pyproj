@@ -7,11 +7,13 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import Pipeline
+from sklearn.compose import TransformedTargetRegressor
+
 
 @dataclass
 class MLModel:
     Model_name: str
-    Model: Any | None = None
+    Model: TransformedTargetRegressor | None = None
     layer_sizes: tuple[int, ...] = ()
     data_name: str = ""
     x: pd.Series | pd.DataFrame = field(default_factory=pd.DataFrame())
@@ -41,24 +43,32 @@ class MLModel:
 class MLModelTrainer:
 
     @staticmethod
-    def create_model(layer_neurons: tuple = (100, 100, 100)) -> Pipeline:
+    def create_model(
+            layer_neurons: tuple[int, ...] = (100, 100, 100)
+    ) -> TransformedTargetRegressor:
 
         mlp_regressor = MLPRegressor(
             hidden_layer_sizes=layer_neurons,
             activation="relu",
             solver="adam",
-            alpha=0,
+            alpha=1e-4,
             learning_rate_init=1e-3,
             max_iter=5000,
             early_stopping=True,
+            validation_fraction=0.1,
             n_iter_no_change=50,
             random_state=42
         )
 
-        model = Pipeline([
-            ("scale", StandardScaler()),
+        x_pipeline = Pipeline([
+            ("scale_x", StandardScaler()),
             ("mlp", mlp_regressor)
         ])
+
+        model = TransformedTargetRegressor(
+            regressor=x_pipeline,
+            transformer=StandardScaler()
+        )
 
         return model
 
@@ -98,7 +108,7 @@ class MLModelTrainer:
         trained_model = MLModel(
             Model_name=model.__class__.__name__,
             Model=model,
-            layer_sizes=model.named_steps["mlp"].hidden_layer_sizes,
+            layer_sizes=model.regressor_.named_steps["mlp"].hidden_layer_sizes,
             data_name=data_name,
             x=x,
             y=y,
@@ -107,6 +117,7 @@ class MLModelTrainer:
             x_test=x_test,
             y_test=y_test,
             y_pred=y_pred,
+            split=test_split,
             R2_pred=r2_pred,
             R2_test_pred=r2_test_pred,
             R2_train_pred=r2_train_pred,

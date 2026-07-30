@@ -1,7 +1,7 @@
 import src.modules.plotting as plotting
 import src.modules.data_managing as data_managing
 import src.config.config_paths as paths
-from src.config.config_parameter_lists import output_parameters
+from src.config.config_parameter_lists import OUTPUT_NEURON_LIST
 import re
 from pathlib import Path
 
@@ -26,7 +26,7 @@ for csv_file in csv_list:
 
     x_df ,y_df = DataManager.split_data(
         data_df=df,
-        number_of_outputs=len(output_parameters)
+        number_of_outputs=len(OUTPUT_NEURON_LIST)
     )
 
     for column in range(y_df.shape[1]):

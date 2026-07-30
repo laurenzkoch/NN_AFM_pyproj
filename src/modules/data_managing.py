@@ -131,3 +131,18 @@ class DataManager:
         shutil.copy2(source_path, temp_path)
 
         return temp_path
+
+    @staticmethod
+    def create_temp_csv_file(source_path: Path) -> Path:
+
+        path_temp_csv_folder = Path(source_path / "temp_csv")
+        path_temp_csv_folder.mkdir(exist_ok=True)
+
+        with tempfile.NamedTemporaryFile(
+                dir=path_temp_csv_folder,
+                prefix=f"temp_",
+                suffix=".csv",
+                delete=False
+        ) as temp_file:
+            temp_csv_path = Path(temp_file.name)
+            return temp_csv_path

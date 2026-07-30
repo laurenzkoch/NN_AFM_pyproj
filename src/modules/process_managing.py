@@ -9,7 +9,7 @@ class ProcessManager:
     def __init__(self) -> None:
         pass
 
-    def start_process(self, path_exe: Path):
+    def start_process(self, path_exe: Path) -> subprocess.Popen:
 
         executable_name = path_exe.name
 
