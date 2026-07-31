@@ -76,13 +76,20 @@ class ProcessManager:
         if process is None:
             return
 
-        if process.poll() is None:
-            try:
-                process.terminate()
-                process.wait(timeout=timeout_seconds)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
+        if isinstance(process, Path):
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/IM", process.name],
+                capture_output=True,
+                text=True
+            )
+        else:
+            if process.poll() is None:
+                try:
+                    process.terminate()
+                    process.wait(timeout=timeout_seconds)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
 
 
     @staticmethod

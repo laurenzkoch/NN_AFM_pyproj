@@ -12,9 +12,8 @@ class EDUVPNProcessor(ProcessManager):
         print("-----------Starting eduVPN----------")
         if self.is_running(config_paths.PATH_eduVPN_EXE):
             self.stop_process(config_paths.PATH_eduVPN_EXE)
-            self.vpn_process = self.start_process(config_paths.PATH_eduVPN_EXE)
-        else:
-            self.vpn_process = self.start_process(config_paths.PATH_eduVPN_EXE)
+            time.sleep(2)
+        self.vpn_process = self.start_process(config_paths.PATH_eduVPN_EXE)
 
     def __enter__(self) -> 'EDUVPNProcessor':
         return self

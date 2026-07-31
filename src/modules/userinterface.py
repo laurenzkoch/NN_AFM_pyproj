@@ -61,12 +61,12 @@ class UserInterface:
         )
         self.progressbar.pack(pady=10)
 
-        self.start_button = ttk.Button(
+        self.start_button_sim = ttk.Button(
             root,
             text="Start",
             command=lambda: self.button_function()
         )
-        self.start_button.pack(pady=15)
+        self.start_button_sim.pack(pady=15)
 
         self.points_label = ttk.Label(
             root,
@@ -78,12 +78,12 @@ class UserInterface:
         status_frame = ttk.Frame(root)
         status_frame.pack(pady=20)
 
-        self.start_button = ttk.Button(
+        self.start_button_edu = ttk.Button(
             status_frame,
             text="Start eduVPN",
             command=self.start_eduvpn
         )
-        self.start_button.pack(pady=15)
+        self.start_button_edu.pack(pady=15)
 
         ttk.Label(
             status_frame,
@@ -144,13 +144,11 @@ class UserInterface:
                                 "Finished"
                             )
                         )
-                        self.start_button.config(state="normal", text="Start")
+                        self.start_button_sim.config(state="normal", text="Start")
                         return
                     case "Starting MCAD":
                         self.points_label.config(text="Starting MCAD...")
-                        self.start_button.config(state="disabled", text="Running.")
-                    case "EduVPN started":
-                        self.set_status("green")
+                        self.start_button_sim.config(state="disabled", text="Running.")
                     case "Calculating":
                         self.points_label.config(text="Calculating...")
 
@@ -168,6 +166,7 @@ class UserInterface:
     def start_eduvpn(self) -> None:
         self.eduvpn_processor = EDUVPNProcessor()
         self.set_status("green")
+        self.start_button_edu.config(state="disabled", text="Running.")
 
 
 def main() -> None:

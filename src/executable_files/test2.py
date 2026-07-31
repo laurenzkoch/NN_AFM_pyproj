@@ -1,39 +1,27 @@
-from pathlib import Path
-
-import pandas as pd
-
-from src.config import config_paths
 
 
-def find_nan_values(csv_path: Path) -> None:
-    data = pd.read_csv(
-        csv_path,
-        encoding="utf-8",
-        sep=";",
-        decimal=","
-    )
 
-    nan_positions = data.isna()
+def valid_y_values(x: int, max_y: int) -> list[int]:
+    if x <= 0:
+        raise ValueError("x muss positiv sein.")
 
-    if not nan_positions.any().any():
-        print("Keine NaN-Werte gefunden.")
-        return
+    power_of_three = 1
 
-    print("NaN-Werte gefunden:")
+    while x % (power_of_three * 3) == 0:
+        power_of_three *= 3
 
-    for row_index, row in nan_positions.iterrows():
-        columns_with_nan = row[row].index.tolist()
+    if power_of_three == 1:
+        return []
 
-        if columns_with_nan:
-            csv_line_number = row_index + 2
-            print(f"CSV-Zeile {csv_line_number}: {columns_with_nan}")
+    return [
+        y
+        for y in range(1, max_y + 1)
+        if y % power_of_three != 0
+    ]
 
 
 def main() -> None:
-    csv_path = config_paths.PATH_DATA_MCAD_RESULTS / "Results_EMagnetic_simulation_radial-variation_28.07.2026_21-00-39_CEST.csv"
-
-
-    find_nan_values(csv_path)
+    pass
 
 
 if __name__ == "__main__":

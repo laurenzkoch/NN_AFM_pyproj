@@ -1,6 +1,7 @@
 import atexit
 import math
 import subprocess
+from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -68,7 +69,7 @@ def _func(
                 mcad.set_value_in_mcad(name, value_tuple[0] * value)
         else:
             if name == "Slot_Number":
-                mcad.set_value_in_mcad(name, value * mcad.get_value_from_mcad("MagPhases"))
+                mcad.set_value_in_mcad(name, int(value) * mcad.get_value_from_mcad("MagPhases"))
             elif name == "Pole_Number":
                 mcad.set_value_in_mcad(name, int(value) * 2)
                 tppc = mcad.get_value_from_mcad("TorquePointsPerCycle")
@@ -96,6 +97,15 @@ def _func(
     else:
        return False
 
+@dataclass
+class MCADInput:
+    variation_type: str
+    parameter_dict: dict[str, list[float]]
+    number_of_datapoints: int = 1000
+    normalize_data: bool = True
+    num_kernel: int = 4
+
+
 
 
 class MCADDataGenerator:
@@ -115,15 +125,11 @@ class MCADDataGenerator:
 
     def start(
         self,
-        parameter_dict: dict[str, list[float]],
-        variation_type: str,
-        number_of_datapoints: int = 1000,
-        num_kernel: int = 4,
-        normalize_data: bool = True,
+        input_: MCADInput,
     )-> None:
 
-        parameter_names = tuple(parameter_dict.keys())
-        value_list = self.generate_value_list(parameter_dict, number_of_datapoints)
+        parameter_names = tuple(input_.parameter_dict.keys())
+        value_list = self.generate_value_list(input_.parameter_dict, input_.number_of_datapoints)
 
         max_progress_steps = len(value_list)
 
@@ -134,26 +140,23 @@ class MCADDataGenerator:
             if ui is None:
                 return
 
-            ui.start_button.config(state="disabled")
+            ui.start_button_sim.config(state="disabled")
 
             self.generate_data(
                 ui=ui,
                 parameter_names=parameter_names,
-                variation_type=variation_type,
+                variation_type=input_.variation_type,
                 max_progress_steps=max_progress_steps,
                 value_list=value_list,
-                num_kernel=num_kernel,
-                normalize_data=normalize_data
+                num_kernel=input_.num_kernel,
+                normalize_data=input_.normalize_data
             )
 
         ui = userinterface.UserInterface(
             max_value=max_progress_steps,
-            title=f"MCAD Simulation {variation_type} Variation",
+            title=f"MCAD Simulation {input_.variation_type} Variation",
             button_function=start_button_clicked
         )
-
-        if eduvpn_process is not None and ui is not None:
-            ui.progress_queue.put(("EduVPN started", None))
 
         ui.root.mainloop()
 
