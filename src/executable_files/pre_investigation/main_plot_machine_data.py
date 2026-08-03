@@ -1,7 +1,7 @@
-from src.modules.data_managing import DataManager
+from modules.utilitis.data_managing import DataManager
 from src.config import config_paths
 from src.config.config_parameter_lists import OUTPUT_NEURON_LIST
-from src.modules.plotting import Plotter
+from modules.utilitis.plotting import Plotter
 
 def main():
 

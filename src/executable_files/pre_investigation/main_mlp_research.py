@@ -1,8 +1,8 @@
 
 
-from src.modules.NN_research import NNresearch
+from modules.generators.NN_research import NNresearch
 from src.config import config_paths
-from src.modules.data_generating_pre_investigation import BasicDataGenerator
+from modules.generators.data_generating_pre_investigation import BasicDataGenerator
 from datetime import datetime
 import pickle
 

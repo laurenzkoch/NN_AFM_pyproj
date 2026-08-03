@@ -5,6 +5,7 @@ from pathlib import Path
 
 import ansys.motorcad.core as pymotorcad
 from src.config.config_parameter_lists import OUTPUT_NEURON_LIST, INPUT_NEURON_LIST
+from src.config.config_paths import PATH_MCAD_BASEFILE
 
 
 class MCADProcessor:
@@ -31,12 +32,13 @@ class MCADProcessor:
         return None
 
 
-    def open_motorcad_file(self, file_path: str | Path = "base_first_data.mot") -> None:
-       file_path = Path(file_path)
-       if not file_path.exists():
+    def open_motorcad_file(self, file_path: str | Path = PATH_MCAD_BASEFILE) -> None:
+
+        file_path = Path(file_path)
+        if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 
-       self.mcad_process.load_from_file(str(file_path))
+        self.mcad_process.load_from_file(str(file_path))
 
 
     def set_value_in_mcad(self, variable_name: str, value: float) -> None:
@@ -75,9 +77,10 @@ class MCADProcessor:
                 value_row.extend(
                     get_values(OUTPUT_NEURON_LIST)
                 )
+                return value_row, True
             else:
                 for _var in INPUT_NEURON_LIST: print(f"{_var}: {value_row[INPUT_NEURON_LIST.index(_var)]}")
-            return value_row, True
+                return value_row, False
         else:
             return value_row, False
 
@@ -128,8 +131,7 @@ class MCADProcessor:
         mean_dia_of_mag_length = (dia_mag_a + dia_mag_i) / 2
         stator_width_per_slot = math.pi * mean_dia_of_mag_length / slot_number
         winding_gcd = math.gcd(slot_number, pole_number)
-        winding_denominator = magphases * winding_gcd
-        winding_ratio = slot_number / winding_denominator
+        winding_ratio = slot_number / magphases / winding_gcd
 
         # radial - stator
         if stator_bore >= stator_lam_dia:
@@ -160,8 +162,8 @@ class MCADProcessor:
         if not winding_ratio.is_integer() or winding_ratio < 1:
             print(
                 "Warning: Winding is not feasible. "
-                f"Slot_Number / (MagPhases * gcd(Pole_Number, Slot_Number)) = "
-                f"{slot_number} / ({magphases} * {winding_gcd}) = {winding_ratio:.6f}."
+                f"Slot_Number / MagPhases / gcd(Pole_Number, Slot_Number) = "
+                f"{slot_number} / {magphases} / {winding_gcd} = {winding_ratio:.6f}."
             )
             return False
         if slot_width >= stator_width_per_slot:

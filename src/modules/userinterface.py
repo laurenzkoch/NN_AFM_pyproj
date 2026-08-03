@@ -3,7 +3,7 @@ from tkinter import ttk
 import queue
 from typing import Callable
 
-from src.modules.eduvpn_processing import EDUVPNProcessor
+from modules.eduvpn_processing import EDUVPNProcessor
 
 
 class UserInterface:

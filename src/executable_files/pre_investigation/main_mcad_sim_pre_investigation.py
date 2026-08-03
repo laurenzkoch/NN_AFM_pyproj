@@ -1,12 +1,12 @@
 from math import sqrt
 
 from config import config_paths
-from modules import process_managing
-from src.modules.data_generating_pre_investigation import PARAMETERDICT
+from modules.utilitis import process_managing
+from modules.generators.data_generating_pre_investigation import PARAMETERDICT
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from src.modules import data_generating_pre_investigation
+from modules.generators import data_generating_pre_investigation
 from src.config.config_parameter_lists import OUTPUT_NEURON_LIST
 
 

@@ -8,10 +8,10 @@ import tempfile
 import numpy as np
 import pandas as pd
 
-from modules.data_managing import DataManager
-from src.modules import process_managing, data_managing
+from modules.utilitis.data_managing import DataManager
+from modules.utilitis import process_managing, data_managing
 from src.config import config_paths, config_parameter_lists, config_process
-from src.modules import mcad_processing
+from modules.motor_cad_processes import mcad_processing
 
 
 @dataclass

@@ -1,7 +1,7 @@
 
 
-from src.modules.NN_research import NNresearch
-from src.modules.data_generating_pre_investigation import BasicDataGenerator
+from modules.generators.NN_research import NNresearch
+from modules.generators.data_generating_pre_investigation import BasicDataGenerator
 
 def main():
 

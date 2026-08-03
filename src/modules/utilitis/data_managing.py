@@ -95,7 +95,7 @@ class DataManager:
 
         try:
             shutil.rmtree(folder)
-            print(f"folder deleted: {folder}")
+            print(f"Folder deleted: {folder}")
         except Exception as exc:
             raise RuntimeError(f"Failed to delete folder: {folder}") from exc
 
@@ -103,12 +103,12 @@ class DataManager:
     @staticmethod
     def delete_file(file: Path) -> None:
         if not file.exists():
-            print(f"file doesn't exsitst: {file}")
+            print(f"File doesn't exsitst: {file}")
             return
         if not file.is_file():
             raise NotADirectoryError(f"Path is not a file: {file}")
         file.unlink()
-        print(f"file deleted: {file}")
+        print(f"File deleted: {file}")
 
 
     @staticmethod

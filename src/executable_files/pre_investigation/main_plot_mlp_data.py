@@ -1,8 +1,8 @@
 
-from modules.ml_model_trainig import MLModel
+from modules.utilitis.ml_model_training import MLModel
 
 from config import config_paths
-from src.modules.plotting import Plotter
+from modules.utilitis.plotting import Plotter
 from pathlib import Path
 import pickle
 

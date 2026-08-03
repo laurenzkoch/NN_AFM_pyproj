@@ -1,5 +1,5 @@
-import src.modules.plotting as plotting
-import src.modules.data_managing as data_managing
+import modules.utilitis.plotting as plotting
+import modules.utilitis.data_managing as data_managing
 import src.config.config_paths as paths
 from src.config.config_parameter_lists import OUTPUT_NEURON_LIST
 import re

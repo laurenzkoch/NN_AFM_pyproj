@@ -1,9 +1,9 @@
 import numpy as np
 import pandas as pd
 
-from src.modules.ml_model_trainig import MLModel, MLModelTrainer
-from src.modules.data_managing import DataManager
-from src.modules.plotting import Plotter
+from modules.utilitis.ml_model_training import MLModel, MLModelTrainer
+from modules.utilitis.data_managing import DataManager
+from modules.utilitis.plotting import Plotter
 from src.config import config_paths
 
 

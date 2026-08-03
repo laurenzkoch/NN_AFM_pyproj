@@ -42,6 +42,7 @@ class ProcessManager:
                 f"{executable_name} could not be started due to an operating system error."
             ) from exc
 
+
     @staticmethod
     def is_running(executable_name):
 

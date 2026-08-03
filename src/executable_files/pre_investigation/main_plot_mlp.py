@@ -1,8 +1,8 @@
 
 import pandas as pd
 
-from modules.ml_model_trainig import MLModel
-from src.modules.plotting import Plotter
+from modules.utilitis.ml_model_training import MLModel
+from modules.utilitis.plotting import Plotter
 from config import config_paths
 import pickle
 from pathlib import Path

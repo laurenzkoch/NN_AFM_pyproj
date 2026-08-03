@@ -1,6 +1,6 @@
 import time
 
-from src.modules.process_managing import ProcessManager
+from modules.utilitis.process_managing import ProcessManager
 from src.config import config_paths
 
 

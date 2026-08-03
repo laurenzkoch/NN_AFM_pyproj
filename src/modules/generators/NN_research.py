@@ -6,8 +6,8 @@ import pandas as pd
 from concurrent.futures import ProcessPoolExecutor
 from scipy.optimize import root_scalar
 
-from src.modules.ml_model_trainig import MLModelTrainer, MLModel
-from src.modules.process_managing import ProcessManager
+from modules.utilitis.ml_model_training import MLModelTrainer
+from modules.utilitis.process_managing import ProcessManager
 from src.config import config_paths
 
 
