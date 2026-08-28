@@ -9,7 +9,7 @@ def main():
             num_sub_designs=3,
             num_subsub_designs=2,
             num_operation_points=100,
-            num_kernel=4
+            num_kernel=1
         )
 
 

@@ -5,7 +5,7 @@ from pathlib import Path
 PATH_MCAD_DATA: Path = Path("D:\\MotorCAD")
 PATH_MCAD_BASEFILE: Path = PATH_MCAD_DATA / "base_first_data.mot"
 
-PATH_DATA: Path = Path(__file__).resolve().parent.parent.parent / "data"
+PATH_DATA: Path = Path(__file__).resolve().parent.parent.parent.parent / "data"
 PATH_DATA_MCAD_RESULTS: Path = PATH_DATA / "MCAD_Results"
 PATH_DATA_MLP_RESEARCH_BASIC: Path = PATH_DATA / "MLP_Research_basic_data"
 PATH_TEMP_DATA: Path = PATH_DATA / "temp_csv"

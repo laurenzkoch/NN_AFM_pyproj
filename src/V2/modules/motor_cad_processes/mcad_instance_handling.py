@@ -17,6 +17,8 @@ def init_mcad_instance() -> None:
 
     if _mcad_instance is None:
         _mcad_instance = mcad_processing.MCADProcessor()
+    if _mcad_instance is not None:
+        open_mcad_file(_mcad_instance)
 
 
 def get_mcad_instance() -> mcad_processing.MCADProcessor:

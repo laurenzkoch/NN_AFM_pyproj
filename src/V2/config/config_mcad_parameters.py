@@ -78,10 +78,11 @@ DEFAULT_VALUES = {
 
 PEAK_CURRENT: tuple[float, float] = (1, 1000)
 PHASE_ADVANCE: tuple[float, float] = (0, 85)
-SHAFT_SPEED: tuple[float, float] = (1, 10000)
+SHAFT_SPEED: tuple[float, float] = (1, 5000)
 
 AIRGAP: tuple[float, float] = (0.1, 10)
 STATOR_BORE: tuple[float, float] = (DEFAULT_VALUES["Shaft_Dia"]+1, 1000)
+SLOT_DEPTH: tuple[float, float] = (4, 100)
 
 
 

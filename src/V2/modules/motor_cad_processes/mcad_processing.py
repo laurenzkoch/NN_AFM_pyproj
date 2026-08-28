@@ -33,7 +33,6 @@ class MCADProcessor:
 
 
     def open_motorcad_file(self, file_path: str | Path = PATH_MCAD_BASEFILE) -> None:
-
         file_path = Path(file_path)
         if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
@@ -66,22 +65,33 @@ class MCADProcessor:
 
 
     def execute_mcad_simulation(self) -> tuple[list[float], bool]:
-
         def get_values(var_list: list[str]) -> list[float]:
             return [self.get_value_from_mcad(var) for var in var_list]
 
         value_row = get_values(INPUT_NEURON_LIST)
 
-        if self.test_boundary_conditions(INPUT_NEURON_LIST, value_row):
+        additional_boundary_parameters = [
+            "Shaft_Dia",
+            "Shaft_Hole_Diameter",
+            "Tooth_Tip_Depth",
+            "MagPhases",
+        ]
+        boundary_parameter_list = INPUT_NEURON_LIST + additional_boundary_parameters
+
+        if self.test_boundary_conditions(boundary_parameter_list, value_row
+        + get_values(additional_boundary_parameters)):
             if self.do_calculation():
                 value_row.extend(
                     get_values(OUTPUT_NEURON_LIST)
                 )
                 return value_row, True
             else:
+                print("Calculation failed")
                 for _var in INPUT_NEURON_LIST: print(f"{_var}: {value_row[INPUT_NEURON_LIST.index(_var)]}")
                 return value_row, False
         else:
+            print("Failed boundary check: ")
+            for _var in INPUT_NEURON_LIST: print(f"{_var}: {value_row[INPUT_NEURON_LIST.index(_var)]}")
             return value_row, False
 
 

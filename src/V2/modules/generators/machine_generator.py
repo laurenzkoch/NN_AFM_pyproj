@@ -70,7 +70,7 @@ def _lambda_generator(
 
 
     #radial: lambda_1_1 = D_Si / D_Sa
-    #tangentail: lambda_1_2 = beta_m / beta_p = 2 * Magnet_Arc_[ED] / 360
+    #tangentail: lambda_1_2 = beta_PM / beta_p = 2 * Magnet_Arc_[ED] / 360
     #       beta_m = Magnet_Arc_[ED] / p ; beta_p = 360° / p
     #axial: lambda_1_3 = l_PM / delta;
 
@@ -110,10 +110,10 @@ def _lambda_generator(
         stator_bore_samples,
         airgap_samples
     ):
-        #tangential: lambda_2_1 = b_S / tau_s = 2*s*b_tto / pi*D_Si * (1+1/lambda_1_1)
+        #tangential: lambda_2_1 = b_S / tau_s = 2*s*b_S / pi*D_Si * (1+1/lambda_1_1)
             # tau_s = pi * (D_Si+D_Sa) / 2*s = pi * D_Si * (1+1/lambda_1_1) / 2*S
             # b_S = pi * lambda_2_1 * D_Si * (1+1/lambda_1_1) / 2*s
-        #axial: lambda_2_2 = dicke des mag rückflusses / tau_p = 2*p * (l_S - d_s) / pi * D_Si * (1+1/lambda_1_1)
+        #axial: lambda_2_2 = dicke des mag rückflusses / tau_p = 2*p * (l_S - d_s) / (pi * D_Si * (1+1/lambda_1_1))
             # l_S = d_S + pi * lambda_2_2 * D_Si * (1+1/lambda_1_1) / 2*p
         #radial: lambda_2_3 = h_PM / (D_Sa - D_Si)/2
             # h_PM = lambda_2_3 * D_Si * (1/lambda_1_1 - 1) / 2
@@ -130,8 +130,8 @@ def _lambda_generator(
             num_of_designs=num_sub_designs,
             d=1,
             seed=10,
-            lower_bounds=np.array([4]),
-            upper_bounds=np.array([100])
+            lower_bounds=np.array([SLOT_DEPTH[0]]),
+            upper_bounds=np.array([SLOT_DEPTH[1]])
         )
 
         slot_pole_samples = _find_pole_slot_pairs(num_of_sub_designs=num_sub_designs)
@@ -149,8 +149,8 @@ def _lambda_generator(
             slot_depth_samples
         ):
 
-            # radial: lambda_3_1 = d_emb / ((D_Si*(1/lambda_1_1 -1)/2 - l_PM)
-                # d_emb = lambda_3_1 * ((D_Si*(1/lambda_1_1 -1) - l_PM)
+            # radial: lambda_3_1 = d_emb / ((D_Si*(1/lambda_1_1 -1)/2 - h_PM)
+                # d_emb = lambda_3_1 * ((D_Si*(1/lambda_1_1 -1) - h_PM)
             # tangential: lambda_3_2 = CircumferentialSegments
                 # -> dimensionslose, diskrete Variable
             # alternativ: lambda_3_2 = 1 / CircumferentialSegments
@@ -185,8 +185,8 @@ def _lambda_generator(
                         "Airgap": airgap_sample,
                         "Magnet_Length": lambda_1_3 * airgap_sample,
 
-                        "Slot_Number": slot_sample,
-                        "Pole_Number": pole_sample,
+                        "Slot_Number": int(slot_sample),
+                        "Pole_Number": int(pole_sample),
                         "Slot_Width": math.pi * lambda_2_1 * stator_bore_sample * (1 + 1/lambda_1_1) / (2*slot_sample),
                         "Stator_Lam_Length": slot_depth_sample + math.pi * lambda_2_2 * stator_bore_sample * (1 + 1/lambda_1_1) / (2*pole_sample),
                         "Slot_Depth": slot_depth_sample,
@@ -213,6 +213,6 @@ def get_generator(
         num_sub_designs: int,
         num_subsub_designs: int,
         num_operation_points: int
-)->Generator[dict[str, float], None, None]:
+)-> Generator[dict[str, float], None, None]:
     return _lambda_generator(num_base_designs, num_sub_designs, num_subsub_designs, num_operation_points)
 

@@ -150,7 +150,7 @@ class UserInterface:
                     case "Starting MCAD":
                         self.points_label.config(text="Starting MCAD...")
                         self.start_button_sim.config(state="disabled", text="Running.")
-                    case "Calculating":
+                    case "Calculating...":
                         self.points_label.config(text="Calculating...")
 
         except queue.Empty:

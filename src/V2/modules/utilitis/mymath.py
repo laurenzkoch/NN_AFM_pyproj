@@ -13,7 +13,7 @@ def divisors(n: int) -> list:
 
 def best_factors(target: int, k: int) -> tuple:
 
-    divs = [d for d in divisors(target) if d > 1]
+    divs = [d for d in divisors(target)]
 
     best = (None,)
     best_score = float("inf")

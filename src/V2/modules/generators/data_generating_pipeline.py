@@ -1,3 +1,4 @@
+import numpy as np
 from typing import Generator
 
 from V2.modules.generators import machine_generator
@@ -14,14 +15,18 @@ from zoneinfo import ZoneInfo
 
 
 
+
 def _func(
     parameter_dict: dict[str, float],
 ) -> tuple[list[float], bool]:
 
     mcad = mcad_instance_handling.get_mcad_instance()
-    mcad_instance_handling.open_mcad_file(mcad)
 
     for name, value in parameter_dict.items():
+
+        # np.float64, np.int64 etc. -> Python float/int
+        if isinstance(value, np.generic):
+            value = value.item()
 
         if name == "Pole_Number":
             tppc = mcad.get_value_from_mcad("TorquePointsPerCycle")
@@ -31,7 +36,6 @@ def _func(
 
     return mcad.execute_mcad_simulation()
 
-
 class MCADDataGenerator:
 
     parameter_list = config_mcad_parameters.INPUT_NEURON_LIST
@@ -39,6 +43,8 @@ class MCADDataGenerator:
     def __init__(self):
         self.processmanager = process_managing.ProcessManager()
         self.datamanager = data_managing.DataManager()
+        self.simulation_thread = None
+        self.simulation_exception = None
 
     def __enter__(self) -> 'MCADDataGenerator':
         return self
@@ -85,17 +91,20 @@ class MCADDataGenerator:
 
         ui.root.mainloop()
 
-        if hasattr(self, "simulation_thread"):
+        if self.simulation_thread is not None:
             self.simulation_thread.join()
+
+        if self.simulation_exception is not None:
+            raise self.simulation_exception
 
 
     @staticmethod
-    def create_csv_path(path_folder_results: Path) -> Path:
+    def create_csv_path(path_folder_results: Path, num_base_designs: int, num_sub_designs: int, num_subsub_designs: int) -> Path:
 
         current_time = datetime.now(ZoneInfo("Europe/Berlin")).strftime("%d.%m.%Y_%H-%M-%S_%Z")
         path_folder = Path(path_folder_results)
         path_folder.mkdir(exist_ok=True)
-        filename = f"Results_EMagnetic_simulation_{current_time}.csv"
+        filename = f"Results_EMagnetic_simulation_{num_base_designs}_{num_sub_designs}_{num_subsub_designs}_{current_time}.csv"
 
         return path_folder / filename
 
@@ -118,17 +127,20 @@ class MCADDataGenerator:
             num_subsub_designs=num_subsub_designs
         )
 
-        simulation_thread = threading.Thread(
+        self.simulation_thread = threading.Thread(
             target=self.run_simulation_pool,
             args=(
                 generator,
                 num_of_kernel,
                 number_of_datapoints,
-                ui.progress_queue,
+                num_base_designs,
+                num_sub_designs,
+                num_subsub_designs,
+                ui.progress_queue
             ),
             daemon=False,
         )
-        simulation_thread.start()
+        self.simulation_thread.start()
 
 
     def run_simulation_pool(
@@ -136,6 +148,9 @@ class MCADDataGenerator:
             machine_generator_instance: Generator[dict[str, float], None, None],
             num_of_kernels: int,
             num_of_datapoints: int,
+            num_base_designs: int,
+            num_sub_designs: int,
+            num_subsub_designs: int,
             progress_queue,
     ) -> None:
 
@@ -145,11 +160,14 @@ class MCADDataGenerator:
         )
 
         csv_path = self.create_csv_path(
-            path_folder_results=config_paths.PATH_DATA_MCAD_RESULTS
+            path_folder_results=config_paths.PATH_DATA_MCAD_RESULTS,
+            num_base_designs=num_base_designs,
+            num_sub_designs=num_sub_designs,
+            num_subsub_designs=num_subsub_designs,
         )
         self.datamanager.create_csv_file(
             path=csv_path,
-            columns_list=config_mcad_parameters.INPUT_NEURON_LIST + config_mcad_parameters.OUTPUT_NEURON_LIST
+            columns_list=config_mcad_parameters.INPUT_NEURON_LIST + config_mcad_parameters.OUTPUT_NEURON_LIST,
         )
 
         progress_queue.put(("Starting MCAD", None))
@@ -159,7 +177,7 @@ class MCADDataGenerator:
             initializer=mcad_instance_handling.init_mcad_instance
         ) as executor:
 
-            progress_queue.put(("Calculating...", None))
+
 
             futures = [
                 executor.submit(
@@ -167,12 +185,28 @@ class MCADDataGenerator:
                     parameter_dict=parameter_dict,
                 ) for parameter_dict in machine_generator_instance
             ]
+            try:
+                for future in as_completed(futures):
+                    all_values, simulation_succeeded = future.result()
+                    progress_queue.put(("Calculating...", None))
 
-            for future in as_completed(futures):
-                all_values, simulation_succeeded = future.result()
-                progress_queue.put(("progress", simulation_succeeded))
+                    progress_queue.put(("progress", simulation_succeeded))
+                    if simulation_succeeded:
+                        self.datamanager.write_row_in_csv(csv_path, all_values)
 
-                if simulation_succeeded:
-                    self.datamanager.write_row_in_csv(csv_path, all_values)
+
+            except Exception as exc:
+
+                self.simulation_exception = exc
+                print(
+                    f"Simulation pool failed: {exc!r}",
+                    flush=True
+                )
+                for future in futures:
+                    future.cancel()
+                executor.terminate_workers()
+
+                return
+
 
             progress_queue.put(("DONE", None))
