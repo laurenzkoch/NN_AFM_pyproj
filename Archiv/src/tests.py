@@ -20,7 +20,7 @@ warnings.filterwarnings(
     module="ansys.motorcad.core.*"
 )
 
-from executable_files.pre_investigation.create_first_data import MCAD
+from V1.executable_files.pre_investigation.create_first_data import MCAD
 from Archiv.src import utils
 
 
