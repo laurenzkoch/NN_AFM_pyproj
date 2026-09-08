@@ -1,11 +1,10 @@
 from __future__ import annotations
 import time
-from pathlib import Path
 import math
 
 import ansys.motorcad.core as pymotorcad
-from config.config_mcad_parameters import *
-from config.config_paths import PATH_MCAD_BASEFILE
+from src.config.config_mcad_parameters import *
+from src.config.config_paths import *
 
 def _print_design(parameter_list: list[str], value_list: list[float | int]) -> None:
     for _var, _value in zip(parameter_list, value_list):
@@ -61,6 +60,10 @@ def test_boundary_conditions(parameter_list: list[str], values: list[float]) -> 
     winding_gcd = math.gcd(slot_number, pole_pairs)
     winding_ratio = slot_number / magphases / winding_gcd
 
+    #operation points
+    phaseadvanced = parameter_dict["PhaseAdvance"]
+
+
     TOL = 1e-6  # mm
 
     # radial - stator
@@ -113,16 +116,39 @@ def test_boundary_conditions(parameter_list: list[str], values: list[float]) -> 
         print("Warning: Magnet length is less than 0")
         return False
 
+
+    # operation points
+    if phaseadvanced < 0 or phaseadvanced >= 90:
+        print("Warning: Phase advance is out of bounds. It should be in the range [0, 90).")
+        return False
+
     return True
 
 
 
 class MCADProcessor:
 
-    def __enter__(self) -> 'MCADProcessor':
-        print(f"-----------Starting MCAD: Connection to licence server should have been initialized----------")
+    def __init__(self) -> None:
+        pymotorcad.set_motorcad_exe(str(PATH_MCAD_EXE))
+        self.mcad_process: pymotorcad.MotorCAD | None = None
+
+    def start(self) -> None:
+        if self.mcad_process is not None:
+            return
+
+        print(
+            "-----------Starting MCAD: "
+            "Connection to licence server should have been initialized----------"
+        )
+
         self.mcad_process = pymotorcad.MotorCAD()
-        self.mcad_process.set_visible(True)
+        if self.mcad_process is not None:
+            self.mcad_process.set_visible(True)
+        else:
+            raise RuntimeError("Failed to start MotorCAD process.")
+
+    def __enter__(self) -> 'MCADProcessor':
+        self.start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -140,29 +166,44 @@ class MCADProcessor:
 
     def open_motorcad_file(self, file_path: str | Path = PATH_MCAD_BASEFILE) -> None:
         file_path = Path(file_path)
-        if not file_path.exists():
-            raise FileNotFoundError(f"File not found: {file_path}")
 
-        self.mcad_process.load_from_file(str(file_path))
+        if not file_path.exists():
+            raise FileNotFoundError(
+                f"File not found: {file_path}"
+            )
+
+        if self.mcad_process is not None:
+            self.mcad_process.load_from_file(str(file_path))
+        else:
+            raise RuntimeError("MotorCAD process is not initialized. Please start the process first.")
 
 
     def set_value_in_mcad(self, variable_name: str, value: float) -> None:
         try:
-            self.mcad_process.set_variable(variable_name, value)
+            if self.mcad_process is not None:
+                self.mcad_process.set_variable(variable_name, value)
+            else:
+                raise RuntimeError("MotorCAD process is not initialized. Please start the process first.")
         except Exception as exc:
             raise ValueError(f"Failed to set variable {variable_name} to value {value}.") from exc
 
 
     def get_value_from_mcad(self, variable_name: str) -> float:
         try:
-            return float(self.mcad_process.get_variable(variable_name))
+            if self.mcad_process is not None:
+                return float(self.mcad_process.get_variable(variable_name))
+            else:
+                raise RuntimeError("MotorCAD process is not initialized. Please start the process first.")
         except Exception as exc:
             raise ValueError(f"Failed to get variable {variable_name} from MotorCAD.") from exc
 
 
     def do_calculation(self) -> bool:
         try:
-            self.mcad_process.do_magnetic_calculation()
+            if self.mcad_process is not None:
+                self.mcad_process.do_magnetic_calculation()
+            else:
+                raise RuntimeError("MotorCAD process is not initialized. Please start the process first.")
             return True
         except Exception as exc:
             print("Warning: Motor-CAD rejected this design point.")

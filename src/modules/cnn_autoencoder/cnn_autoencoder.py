@@ -5,9 +5,9 @@ class Conv3dAutoencoder(nn.Module):
 
     def __init__(
             self,
-            latent_dim: int = 16,
+            latent_dim: int = 15,
             num_output_neurons: int = 7,
-            points_per_dim: int = 10,
+            points_per_dim: int = 5,
             kernel_size: int = 3,
             out_channels: int = 15
     ):

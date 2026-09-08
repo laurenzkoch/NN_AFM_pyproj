@@ -1,6 +1,6 @@
-from modules.process.motor_cad_processes import mcad_processing
-from config.config_paths import PATH_MCAD_BASEFILE
-from modules.data_managment.temp_files import create_temp_file_copy
+from src.modules.process.motor_cad_processes import mcad_processing
+from src.config.config_paths import PATH_MCAD_BASEFILE
+from src.modules.data_managment.temp_files import create_temp_file_copy
 
 import atexit
 from pathlib import Path
@@ -17,6 +17,7 @@ def init_mcad_instance() -> None:
     if _mcad_instance is None:
         _mcad_instance = mcad_processing.MCADProcessor()
     if _mcad_instance is not None:
+        _mcad_instance.start()
         open_mcad_file(_mcad_instance)
 
 

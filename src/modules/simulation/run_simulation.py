@@ -2,9 +2,8 @@ import numpy as np
 from typing import Generator
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from modules.data_managment.csv_io import *
-from modules.process.resources import *
-from modules.process.motor_cad_processes import mcad_instance_handling
+from src.modules.data_managment.csv_io import *
+from src.modules.process.motor_cad_processes import mcad_instance_handling
 
 
 

@@ -2,7 +2,7 @@
 import shutil
 import tempfile
 
-from config.config_paths import *
+from src.config.config_paths import *
 
 def create_temp_file_copy(source_path: Path) -> Path:
 

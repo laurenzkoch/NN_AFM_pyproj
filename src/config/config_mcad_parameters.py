@@ -39,8 +39,9 @@ OP_PARAMETERS = [
     "ShaftSpeed",
     "RMSPhaseCurrent_D",
     "RMSPhaseCurrent_Q",
-    #"PeakCurrent",
-    #"PhaseAdvance",
+    "RMSCurrentDensity",
+    "PeakCurrent",
+    "PhaseAdvance",
 ]
 
 DEFAULT_VALUES = {
@@ -87,11 +88,13 @@ DEFAULT_VALUES = {
     "PeakCurrent": 5,
     "ShaftSpeed": 3000,
     "PhaseAdvance": 0,
+    "RMSPhaseCurrent_D": 0,
+    "RMSPhaseCurrent_Q": 5.0,
     "DCBusVoltage": 800,
 }
 
-D_CURRENT_DENSITY: tuple[float, float] = (-1000, 0)
-Q_CURRENT_DENSITY: tuple[float, float] = (1, 1000)
+D_CURRENT_DENSITY: tuple[float, float] = (-10, 0)
+Q_CURRENT_DENSITY: tuple[float, float] = (1, 100)
 #PHASE_ADVANCE: tuple[float, float] = (0, 85)
 SHAFT_SPEED: tuple[float, float] = (1, 5000)
 

@@ -48,24 +48,34 @@ class ProcessManager:
     def stop_process(self) -> None:
 
         if self.process is None:
-            return
-
-        if self.process.poll() is None:
             subprocess.run(
                 [
                     "taskkill",
                     "/F",
                     "/T",
-                    "/PID",
-                    str(self.process.pid),
+                    "/IM",
+                    self.executable_name,
                 ],
                 capture_output=True,
-                text=True
+                text=True,
             )
+        else:
+            if self.process.poll() is None:
+                subprocess.run(
+                    [
+                        "taskkill",
+                        "/F",
+                        "/T",
+                        "/PID",
+                        str(self.process.pid),
+                    ],
+                    capture_output=True,
+                    text=True
+                )
 
         self.process = None
 
-
+        time.sleep(2)
 
     def is_running(self):
 

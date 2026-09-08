@@ -5,6 +5,7 @@ import pandas as pd
 
 
 def create_csv_file(path: Path, columns_list: list[str]):
+    path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, mode="w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file, delimiter=";", quotechar='"')
         writer.writerow(columns_list)

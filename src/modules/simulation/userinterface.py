@@ -12,6 +12,7 @@ class MyUserInterface:
             title: str = "Progress Monitoring",
             geometry: str = "450x350",
             button_function: Callable[[], None] = lambda: None,
+            autostart: bool = False
     ) -> None:
 
         self.root = tk.Tk()
@@ -66,6 +67,9 @@ class MyUserInterface:
             text="Ready"
         )
         self.info_label.pack(pady=10)
+
+        if autostart:
+            self.root.after_idle(self.button_function)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.root.destroy()

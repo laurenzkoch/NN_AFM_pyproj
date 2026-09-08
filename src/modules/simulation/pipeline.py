@@ -1,21 +1,22 @@
 
 from threading import Thread
+from tkinter import TclError
 from typing import Any
 from queue import Queue
 import queue
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from config.config_paths import *
-from config.config_mcad_parameters import *
-from modules.process.resources import determine_number_of_kernels
+from src.config.config_paths import *
+from src.config.config_mcad_parameters import *
 
-from modules.simulation.userinterface import MyUserInterface
-from modules.generators.machine_generator import get_generator
-from modules.simulation.run_simulation import run_simulation_pool
-from modules.data_managment.file_io import delete_folder
-from modules.process.eduvpn import EDUVPNProcessor
-from modules.data_managment.csv_io import create_csv_file
+from src.modules.process.resources import determine_number_of_kernels
+from src.modules.simulation.userinterface import MyUserInterface
+from src.modules.generators.machine_generator import AFMMachineGenerator
+from src.modules.simulation.run_simulation import run_simulation_pool
+from src.modules.data_managment.file_io import delete_folder
+from src.modules.process.eduvpn import EDUVPNProcessor
+from src.modules.data_managment.csv_io import create_csv_file
 
 class SimulationPipeline:
 
@@ -25,8 +26,12 @@ class SimulationPipeline:
             num_base_designs: int,
             num_sub_designs: int,
             num_subsub_designs: int,
-            num_operation_points_per_dim: int
+            num_operation_points_per_dim: int,
+            autostart: bool = False,
+            start_eduvpn: bool = True
     ) -> None:
+        self.autostart = autostart
+        self.start_eduvpn = start_eduvpn
         self.ui: MyUserInterface | None = None
         self.simulation_thread: Thread | None = None
         self.simulation_exception: Any | None = None
@@ -34,7 +39,7 @@ class SimulationPipeline:
         self.dropped_points: int = 0
         self.progress_queue: Queue[tuple[str, bool | None | Exception]] | None = None
         self.eduvpn_processor: EDUVPNProcessor | None  = None
-        self.num_datapoints: int = num_base_designs * num_sub_designs * num_subsub_designs * num_operation_points_per_dim ** 3
+        self.num_datapoints: int = num_base_designs * num_sub_designs * num_subsub_designs * num_operation_points_per_dim**3
         self.csv_filepath: Path = self.create_csv_filepath(
             num_base_designs,
             num_sub_designs,
@@ -49,16 +54,22 @@ class SimulationPipeline:
             determine_number_of_kernels(num_kernel),
             self.num_datapoints
         )
+        self.afmmachine_generator = AFMMachineGenerator(
+            num_base_designs=num_base_designs,
+            num_sub_designs=num_sub_designs,
+            num_subsub_designs=num_subsub_designs,
+            num_operation_points_per_dim=num_operation_points_per_dim
+        )
 
-    def __enter__(self) -> "SimulationPipeline":
-
-        self.eduvpn_processor = EDUVPNProcessor()
+    def start(self) -> None:
+        if self.start_eduvpn:
+            self.eduvpn_processor = EDUVPNProcessor().start()
         self.progress_queue = Queue()
 
         if self.csv_filepath is not None:
             create_csv_file(
                 path=self.csv_filepath,
-                columns_list=INPUT_NEURON_LIST + OP_PARAMETERS + OUTPUT_NEURON_LIST,
+                columns_list=INPUT_NEURON_LIST + OP_PARAMETERS + OUTPUT_NEURON_LIST
             )
         else:
             raise RuntimeError("CSV file path is None.")
@@ -68,13 +79,20 @@ class SimulationPipeline:
         self._initialize_progress_tracking()
         self._start_threads()
 
+
+    def __enter__(self) -> "SimulationPipeline":
+        self.start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         delete_folder(PATH_MCAD_DATA / PATH_TEMP_FILES)
         if self.eduvpn_processor is not None:
             self.eduvpn_processor.__exit__(exc_type, exc_val, exc_tb)
-
+        if self.ui is not None and self.ui.root is not None:
+            try:
+                self.ui.root.destroy()
+            except TclError:
+                pass
 
     def _initialize_progress_tracking(self) -> None:
         if self.progress_queue is not None:
@@ -99,7 +117,7 @@ class SimulationPipeline:
         def _run_simulation() -> None:
             try:
                 run_simulation_pool(
-                    get_generator(),
+                    self.afmmachine_generator.get_generator(),
                     self.progress_queue,
                     self.csv_filepath,
                     self.num_workers,
@@ -110,20 +128,21 @@ class SimulationPipeline:
                 else:
                     raise RuntimeError("Progress queue is not initialized.") from exc
 
-        if self.eduvpn_processor is not None and self.progress_queue is not None:
+        if self.progress_queue is not None:
             self.simulation_thread = Thread(
                 target=_run_simulation,
                 daemon=False,
             )
         else:
-            raise RuntimeError("EDUVPN processor or progress queue is not initialized.")
+            raise RuntimeError("Progress queue is not initialized.")
 
 
     def _initialize_ui(self) -> None:
         self.ui = MyUserInterface(
             max_value=self.num_datapoints,
             title="MCAD Simulation",
-            button_function=self._start_simulation
+            button_function=self._start_simulation,
+            autostart=self.autostart
         )
 
 
@@ -171,6 +190,8 @@ class SimulationPipeline:
                                 )
                             )
                             self.ui.start_button_sim.config(text="Simulation Finished", state="disabled")
+                            if self.autostart:
+                                self.ui.root.destroy()
                             return
                         case "Starting MCAD":
                             self.ui.info_label.config(text="Starting MCAD...")
@@ -185,6 +206,9 @@ class SimulationPipeline:
                                 text="Simulation Failed",
                                 state="disabled",
                             )
+                            if self.autostart:
+                                self.ui.root.destroy()
+                            return
 
             except queue.Empty:
                 pass
