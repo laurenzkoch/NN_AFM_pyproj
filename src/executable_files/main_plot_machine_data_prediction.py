@@ -1,6 +1,6 @@
 import numpy as np
 
-from modules.mlp_model.mlp_model_training import MLPModel, MLPModelTrainer
+from modules.neuronal_networks.mlp_model import MLPModel, MLPModelTrainer
 from Archiv.src.data_managing import *
 from modules.utilitis.plotting import Plotter
 from config import config_paths

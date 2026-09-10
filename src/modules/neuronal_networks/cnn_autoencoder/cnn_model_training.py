@@ -2,17 +2,26 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from modules.cnn_autoencoder.cnn_autoencoder import Conv3dAutoencoder
-from modules.cnn_autoencoder.create_tensor import create_tensor
+from modules.neuronal_networks.cnn_autoencoder.cnn_autoencoder import Conv3dAutoencoder
+
+from src.config.config_mcad_parameters import *
+
 
 class CNNModelTrainer:
 
-    def __init__(self):
-
+    def __init__(
+            self,
+            num_points_per_dim: int,
+            num_machine_designs: int,
+            filename: str
+    ):
+        self.num_points_per_dim = num_points_per_dim
+        self.num_machine_designs = num_machine_designs
+        self.filename = filename
         self.model = Conv3dAutoencoder(
             latent_dim=16,
-            num_output_neurons=7,
-            points_per_dim=10,
+            num_output_neurons=len(OUTPUT_NEURON_LIST),
+            points_per_dim=num_points_per_dim,
             out_channels=15
         )
         self.criterion = nn.MSELoss()
@@ -22,34 +31,34 @@ class CNNModelTrainer:
         )
 
 
-    @staticmethod
-    def _load_data(filename: str, num_machine_designs: int, num_points_per_dim: int) -> DataLoader:
+    def _load_data(self) -> DataLoader:
 
         x = create_tensor(
-            filename=filename,
-            num_machine_designs=num_machine_designs,
-            num_points_per_dim=num_points_per_dim
+            filename=self.filename,
+            num_machine_designs=self.num_machine_designs,
+            num_points_per_dim=self.num_points_per_dim
         )
         dataset = TensorDataset(x)
+
         return DataLoader(
             dataset,
-            batch_size=30,
+            batch_size=1,
             shuffle=True
         )
 
+    def __enter__(self) -> "CNNModelTrainer":
+        self.data = self._load_data()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return
+
+
+
     def training(
             self,
-            filename: str,
             num_epochs: int,
-            num_machine_designs:int,
-            num_points_per_dim: int
     ) -> Conv3dAutoencoder:
-
-        data = self._load_data(
-            filename=filename,
-            num_machine_designs=num_machine_designs,
-            num_points_per_dim=num_points_per_dim
-        )
 
         for epoch in range(num_epochs):
 
@@ -57,7 +66,7 @@ class CNNModelTrainer:
 
             epoch_loss = 0.0
 
-            for (x_batch,) in data:
+            for (x_batch,) in self.data:
 
                 # 1. Gradienten zurücksetzen
                 self.optimizer.zero_grad()
@@ -79,7 +88,7 @@ class CNNModelTrainer:
 
                 epoch_loss += loss.item()
 
-            epoch_loss /= len(data)
+            epoch_loss /= len(self.data)
 
             print(
                 f"Epoch {epoch}: "

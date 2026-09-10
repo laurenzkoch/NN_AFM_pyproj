@@ -70,15 +70,15 @@ class Conv3dAutoencoder(nn.Module):
     def encode(self, x):
 
         x = self.encoder_conv(x)
-        #before: (batch, num_output_neurons, points_per_dim, points_per_dim, points_per_dim)
-        #after: (batch, 2*out_channels, points_per_dim, points_per_dim, points_per_dim)
+        #before: (batch, num_output_neurons, num_points_per_dim, num_points_per_dim, num_points_per_dim)
+        #after: (batch, 2*out_channels, num_points_per_dim, num_points_per_dim, num_points_per_dim)
 
         x = x.flatten(start_dim=1)
-        #before: (batch, 2*out_channels, points_per_dim, points_per_dim, points_per_dim)
-        #after: (batch, 2*out_channels * points_per_dim**3)
+        #before: (batch, 2*out_channels, num_points_per_dim, num_points_per_dim, num_points_per_dim)
+        #after: (batch, 2*out_channels * num_points_per_dim**3)
 
         z = self.encoder_linear(x)
-        #before: (batch, 2*out_channels * points_per_dim**3)
+        #before: (batch, 2*out_channels * num_points_per_dim**3)
         #after: (latent_dim)
 
         return z
@@ -87,7 +87,7 @@ class Conv3dAutoencoder(nn.Module):
 
         x = self.decoder_linear(z)
         #before: (latent_dim)
-        #after: (batch, 2*out_channels * points_per_dim**3)
+        #after: (batch, 2*out_channels * num_points_per_dim**3)
 
         x = x.view(
             -1,
@@ -96,12 +96,12 @@ class Conv3dAutoencoder(nn.Module):
             self.points_per_dim,
             self.points_per_dim
         )
-        #before: (batch, 2*out_channels * points_per_dim**3)
-        #after: (batch, 2*out_channels, points_per_dim, points_per_dim, points_per_dim)
+        #before: (batch, 2*out_channels * num_points_per_dim**3)
+        #after: (batch, 2*out_channels, num_points_per_dim, num_points_per_dim, num_points_per_dim)
 
         x = self.decoder_conv(x)
-        #before: (batch, 2*out_channels, points_per_dim, points_per_dim, points_per_dim)
-        #after: (batch, num_output_neurons, points_per_dim, points_per_dim, points_per_dim)
+        #before: (batch, 2*out_channels, num_points_per_dim, num_points_per_dim, num_points_per_dim)
+        #after: (batch, num_output_neurons, num_points_per_dim, num_points_per_dim, num_points_per_dim)
 
         return x
 

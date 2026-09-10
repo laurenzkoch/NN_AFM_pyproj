@@ -1,4 +1,4 @@
-
+from logging import raiseExceptions
 from threading import Thread
 from tkinter import TclError
 from typing import Any
@@ -24,8 +24,7 @@ class SimulationPipeline:
             self,
             num_kernel: int,
             num_base_designs: int,
-            num_sub_designs: int,
-            num_subsub_designs: int,
+            num_lam_designs: int,
             num_operation_points_per_dim: int,
             autostart: bool = False,
             start_eduvpn: bool = True
@@ -39,16 +38,10 @@ class SimulationPipeline:
         self.dropped_points: int = 0
         self.progress_queue: Queue[tuple[str, bool | None | Exception]] | None = None
         self.eduvpn_processor: EDUVPNProcessor | None  = None
-        self.num_datapoints: int = num_base_designs * num_sub_designs * num_subsub_designs * num_operation_points_per_dim**3
-        self.csv_filepath: Path = self.create_csv_filepath(
-            num_base_designs,
-            num_sub_designs,
-            num_subsub_designs,
-            num_operation_points_per_dim
-        )
+        self.num_datapoints: int = num_base_designs * num_lam_designs**3 * num_operation_points_per_dim**3
+        self.csv_filepath: Path | None = None
         self.num_base_designs = num_base_designs
-        self.num_sub_designs = num_sub_designs
-        self.num_subsub_designs = num_subsub_designs
+        self.num_lam_designs = num_lam_designs
         self.num_operation_points_per_dim = num_operation_points_per_dim
         self.num_workers = min(
             determine_number_of_kernels(num_kernel),
@@ -56,9 +49,9 @@ class SimulationPipeline:
         )
         self.afmmachine_generator = AFMMachineGenerator(
             num_base_designs=num_base_designs,
-            num_sub_designs=num_sub_designs,
-            num_subsub_designs=num_subsub_designs,
-            num_operation_points_per_dim=num_operation_points_per_dim
+            num_lam_designs=num_lam_designs,
+            num_operation_points_per_dim=num_operation_points_per_dim,
+            num_data_points=self.num_datapoints
         )
 
     def start(self) -> None:
@@ -66,6 +59,7 @@ class SimulationPipeline:
             self.eduvpn_processor = EDUVPNProcessor().start()
         self.progress_queue = Queue()
 
+        self.csv_filepath = self.create_csv_filepath()
         if self.csv_filepath is not None:
             create_csv_file(
                 path=self.csv_filepath,
@@ -79,20 +73,23 @@ class SimulationPipeline:
         self._initialize_progress_tracking()
         self._start_threads()
 
+    def stop(self) -> None:
+        delete_folder(PATH_MCAD_DATA / PATH_TEMP_FILES)
+        if self.eduvpn_processor is not None:
+            self.eduvpn_processor.stop()
+        if self.ui is not None and self.ui.root is not None:
+            try:
+                self.ui.root.destroy()
+            except TclError:
+                pass
+
 
     def __enter__(self) -> "SimulationPipeline":
         self.start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        delete_folder(PATH_MCAD_DATA / PATH_TEMP_FILES)
-        if self.eduvpn_processor is not None:
-            self.eduvpn_processor.__exit__(exc_type, exc_val, exc_tb)
-        if self.ui is not None and self.ui.root is not None:
-            try:
-                self.ui.root.destroy()
-            except TclError:
-                pass
+        self.stop()
 
     def _initialize_progress_tracking(self) -> None:
         if self.progress_queue is not None:
@@ -116,12 +113,13 @@ class SimulationPipeline:
     def _initialize_simulation_thread(self) -> None:
         def _run_simulation() -> None:
             try:
-                run_simulation_pool(
-                    self.afmmachine_generator.get_generator(),
-                    self.progress_queue,
-                    self.csv_filepath,
-                    self.num_workers,
-                )
+                if self.csv_filepath is not None:
+                    run_simulation_pool(
+                        self.afmmachine_generator.get_generator(),
+                        self.progress_queue,
+                        self.csv_filepath,
+                        self.num_workers,
+                    )
             except Exception as exc:
                 if self.progress_queue is not None:
                     self.progress_queue.put(("ERROR", exc))
@@ -218,20 +216,13 @@ class SimulationPipeline:
             raise RuntimeError("Progress queue or user interface is not initialized.")
 
 
-    @staticmethod
-    def create_csv_filepath(
-        num_base_designs: int,
-        num_sub_designs: int,
-        num_subsub_designs: int,
-        num_operation_points_per_dim: int
-    ) -> Path:
+    def create_csv_filepath(self) -> Path:
         current_time = datetime.now(ZoneInfo("Europe/Berlin")).strftime("%d.%m.%Y_%H-%M-%S_%Z")
         filename = (
             f"Results_EMagnetic_simulation_"
-            f"{num_base_designs}_"
-            f"{num_sub_designs}_"
-            f"{num_subsub_designs}_"
-            f"{num_operation_points_per_dim}_"
+            f"{self.num_base_designs}_"
+            f"{self.num_lam_designs}_"
+            f"{self.num_operation_points_per_dim}_"
             f"{current_time}.csv"
         )
         return PATH_DATA_MCAD_RESULTS / filename

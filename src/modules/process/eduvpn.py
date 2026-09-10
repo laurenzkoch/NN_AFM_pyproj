@@ -17,6 +17,10 @@ class EDUVPNProcessor(ProcessManager):
         self.start_process()
         return self
 
+    def stop(self) -> None:
+        print("-----------Closing eduVPN----------")
+        self.stop_process()
+
     def __enter__(self) -> "EDUVPNProcessor":
         self.start()
         return self
@@ -27,5 +31,4 @@ class EDUVPNProcessor(ProcessManager):
         exc_val,
         exc_tb,
     ) -> None:
-        print("-----------Closing eduVPN----------")
-        self.stop_process()
+        self.stop()

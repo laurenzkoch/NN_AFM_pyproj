@@ -9,7 +9,7 @@ from src.modules.process.motor_cad_processes import mcad_instance_handling
 
 def _func(
     parameter_dict: dict[str, float],
-) -> tuple[list[float], bool]:
+) -> tuple[list[float] | None, bool]:
 
     mcad = mcad_instance_handling.get_mcad_instance()
 
@@ -53,11 +53,11 @@ def run_simulation_pool(
 
         try:
             for future in as_completed(futures):
-                all_values, simulation_succeeded = future.result()
+                values_row, simulation_succeeded = future.result()
                 progress_queue.put(("progress", simulation_succeeded))
 
-                if simulation_succeeded:
-                    write_row_in_csv(csv_path, all_values)
+                if simulation_succeeded and values_row is not None:
+                    write_row_in_csv(csv_path, values_row)
         except Exception as exc:
 
             print(f"Simulation pool failed: {exc!r}")

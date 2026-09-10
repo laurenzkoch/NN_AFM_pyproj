@@ -211,12 +211,10 @@ class MCADProcessor:
             return False
 
 
-    def execute_mcad_simulation(self) -> tuple[list[float], bool]:
+    def execute_mcad_simulation(self) -> tuple[list[float] | None, bool]:
 
         def get_values(var_list: list[str]) -> list[float]:
             return [self.get_value_from_mcad(var) for var in var_list]
-
-        value_row = get_values(INPUT_NEURON_LIST + OP_PARAMETERS)
 
         all_parameters: list[str] = list(DEFAULT_VALUES.keys())
         all_values: list[float] = get_values(all_parameters)
@@ -225,20 +223,21 @@ class MCADProcessor:
         if test_boundary_conditions(all_parameters, all_values):
 
             if self.do_calculation():
+                value_row = get_values(INPUT_NEURON_LIST + OP_PARAMETERS + OUTPUT_NEURON_LIST)
                 output_values = get_values(OUTPUT_NEURON_LIST)
                 value_row.extend(output_values)
 
-                print("___________Calculation ran sucessfully___________")
-                _print_design(all_parameters, all_values)
-                _print_design(OUTPUT_NEURON_LIST, output_values)
+                #print("___________Calculation ran sucessfully___________")
+                #_print_design(all_parameters, all_values)
+                #_print_design(OUTPUT_NEURON_LIST, output_values)
                 return value_row, True
 
             else:
                 print("___________Calculation failed_____________________")
                 _print_design(all_parameters, all_values)
-                return value_row, False
+                return None, False
 
         else:
             print("_______________Failed boundary check:_________________ ")
             _print_design(all_parameters, all_values)
-            return value_row, False
+            return None, False
