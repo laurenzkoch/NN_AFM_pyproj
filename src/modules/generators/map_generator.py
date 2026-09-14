@@ -25,6 +25,6 @@ if __name__ == "__main__":
         i_min_max=SHAFT_SPEED,
         j_min_max=Q_CURRENT_DENSITY,
         k_min_max=D_CURRENT_DENSITY,
-        num_operation_points_per_dim=2
+        num_operation_points_per_dim=5
     )
     print(op_samples)

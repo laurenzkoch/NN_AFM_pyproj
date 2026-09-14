@@ -90,6 +90,9 @@ def test_boundary_conditions(parameter_list: list[str], values: list[float]) -> 
     if slot_depth >= stator_lam_length:
         print("Warning: Slot depth is greater than stator lamination length.")
         return False
+    if rotor_lam_length < 0.25 or magnet_length < 0.25:
+        print("Axial length of rotor/stator/magnets too short")
+        return False
 
 
     # winding
@@ -224,8 +227,6 @@ class MCADProcessor:
 
             if self.do_calculation():
                 value_row = get_values(INPUT_NEURON_LIST + OP_PARAMETERS + OUTPUT_NEURON_LIST)
-                output_values = get_values(OUTPUT_NEURON_LIST)
-                value_row.extend(output_values)
 
                 #print("___________Calculation ran sucessfully___________")
                 #_print_design(all_parameters, all_values)

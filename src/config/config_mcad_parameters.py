@@ -31,7 +31,6 @@ INPUT_NEURON_LIST = [
     "Magnet_Length",
     "Magnet_Embed_Depth",
     "Magnet_Thickness",
-    "CircumferentialSegments",
     "Magnet_Arc_[ED]",
 ]
 
@@ -93,24 +92,24 @@ DEFAULT_VALUES = {
     "DCBusVoltage": 800,
 }
 
-D_CURRENT_DENSITY: tuple[float, float] = (-10, 0)
-Q_CURRENT_DENSITY: tuple[float, float] = (1, 100)
+D_CURRENT_DENSITY: tuple[float, float] = (-50, 0)
+Q_CURRENT_DENSITY: tuple[float, float] = (5, 100)
 #PHASE_ADVANCE: tuple[float, float] = (0, 85)
 SHAFT_SPEED: tuple[float, float] = (1, 5000)
 
 AIRGAP: tuple[float, float] = (0.25, 5)
-STATOR_BORE: tuple[float, float] = (DEFAULT_VALUES["Shaft_Dia"]+1, 200)
+STATOR_BORE: tuple[float, float] = (DEFAULT_VALUES["Shaft_Dia"]+1, 100)
 SLOT_DEPTH: tuple[float, float] = (4, 100)
 
 LAMBDA_1_1: tuple[float, float] = (0.2, 0.8)    # radial:       lambda_1_1 = D_Si / D_Sa
 LAMBDA_1_2: tuple[float, float] = (0.5, 0.9)    # tangential:   lambda_1_2 = beta_PM / beta_p = 2 * Magnet_Arc_[ED] / 360
-LAMBDA_1_3: tuple[float, float] = (0.01, 5.0)   # axial:        lambda_1_3 = l_PM / g;
+LAMBDA_1_3: tuple[float, float] = (0.2, 1.0)    # axial:        lambda_1_3 = g / l_PM
 LAMBDA_2_1: tuple[float, float] = (0.3, 0.7)    # tangential:   lambda_2_1 = b_S / tau_s = s*b_S / pi*D_Si
 LAMBDA_2_2: tuple[float, float] = (0.1, 1.0)    # axial:        lambda_2_2 = b_S / d_S
 LAMBDA_2_3: tuple[float, float] = (0.6, 1.0)    # radial:       lambda_2_3 = h_PM / (D_Sa - D_Si)/2
-LAMBDA_3_1: tuple[float, float] = (0.0, 0.95)   # radial:       lambda_3_1 = d_emb / ((D_Si*(1/lambda_1_1 -1)/2 - h_PM)
+LAMBDA_3_1: tuple[float, float] = (0.0, 0.95)   # radial:       lambda_3_1 = d_emb / ((D_Sa - D_Si)/2 - h_PM)
 LAMBDA_3_2: tuple[float, float] = (0.1, 0.4)    # tangential:   lambda_3_2 = dicke des mag rückflusses / tau_p = 2*p * (l_S - d_s) / (pi * D_Si * (1+1/lambda_1_1))
-LAMBDA_3_3: tuple[float, float] = (0.5, 5.0)    # axial:        lambda_3_3 = l_R / l_PM
+LAMBDA_3_3: tuple[float, float] = (0.2, 1.0)    # axial:        lambda_3_3 = l_PM / l_R
 
 
 

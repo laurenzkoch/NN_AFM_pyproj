@@ -1,3 +1,5 @@
+
+import math
 import numpy as np
 import torch
 import pandas as pd
@@ -14,51 +16,45 @@ class DataTensor:
     def __init__(
             self,
             filename: str,
-            label_axis: tuple[str, str, str] = ("RMSPhaseCurrent_Q", "RMSPhaseCurrent_D", "ShaftSpeed"),
+            label_axis: tuple[str, str, str] = ("RMSPhaseCurrent_D_density", "RMSPhaseCurrent_Q_density", "ShaftSpeed"),
             batch_size: int = 10
-    ):
+    ) -> None:
+
         self.data_df = self._get_data(filename)
-        self.num_machines = 0
-        self.num_mappoints_per_dim = 0
+        self._recalculate_data()
+
         self.label_axis = label_axis
-        self.machine_geomtry, self.map_tensor = self._create_map_tensor()
-        geometry_tensor_train, geomtry_tensor_validation, map_tensor_train, map_tensor_validation = self._split_data()
+        self.axis: list[list] = self._identify_map_axis_values()
+        self.map_shape = tuple(len(axis) for axis in self.axis)
+        self.axis_indices: list[dict] = self._create_axis_indices()
+
+        self._clean_data()
+
+        self.machines: DataFrameGroupBy = self._identify_machines_in_csv()
+        self.num_machines = len(self.machines)
+
+        self.machine_geometry_tensor = self._create_machine_geometry_tensor()
+        self.nan_array: np.ndarray = self._create_nan_array()
+        self.map_tensor: torch.Tensor = self._create_map_tensor()
+
+        (
+            x_train,
+            x_validation,
+            y_train,
+            y_validation
+        ) = self._split_data(test_split=0.2)
 
         self.dataloader_train = DataLoader(
-            TensorDataset(geometry_tensor_train, map_tensor_train),
+            TensorDataset(x_train, y_train),
             batch_size=batch_size,
             shuffle=True
         )
+
         self.dataloader_validation = DataLoader(
-            TensorDataset(geomtry_tensor_validation, map_tensor_validation),
+            TensorDataset(x_validation, y_validation),
             batch_size=batch_size,
             shuffle=False
         )
-
-
-    def _create_map_tensor(self) -> tuple[torch.Tensor, torch.Tensor]:
-        machines = self._identify_machines_in_csv()
-        axis = self._identify_map_axis_values()
-        axis_indicies = self._create_axis_indicies(axis)
-        x = self._create_nan_array()
-
-        machine_geometry = []
-        for idx_machine, (geometry_tuple, map_df) in enumerate(machines):
-            machine_geometry.append(geometry_tuple)
-            for _, row in map_df.iterrows():
-                map_indicies = [
-                    axis_indicies[axe][row[label]] for axe, label in enumerate(self.label_axis)
-                ] #list with three indicies: index on the axe "axe" of the value row[label]
-
-                for idx_channel, channel in enumerate(OUTPUT_NEURON_LIST):
-                    x[idx_machine, idx_channel, map_indicies[0], map_indicies[1], map_indicies[2]] = row[channel]
-
-        machine_geometry = torch.tensor(
-            machine_geometry,
-            dtype=torch.float32
-        )
-
-        return machine_geometry, torch.tensor(x, dtype=torch.float32)
 
 
     @staticmethod
@@ -69,72 +65,134 @@ class DataTensor:
         )
         return data_df
 
+    def _recalculate_data(self) -> None:
+        conductor_area = (
+                self.data_df["PeakCurrent"]
+                / (np.sqrt(2)**2 * self.data_df["RMSCurrentDensity"])
+        )
+        self.data_df["RMSPhaseCurrent_D_density"] = round(self.data_df["RMSPhaseCurrent_D"]/ conductor_area, 2)
+        self.data_df["RMSPhaseCurrent_Q_density"] = round(self.data_df["RMSPhaseCurrent_Q"]/ conductor_area, 2)
+
+
+    def _clean_data(self) -> None:
+
+        _machines = self._identify_machines_in_csv()
+        points_per_map = math.prod(self.map_shape)
+        _indices_to_delete = []
+
+        maps_with_duplicate_points = 0
+        uncomplete_maps = 0
+
+        for idx_machine, (geometry_tuple, map_df) in enumerate(_machines):
+
+            operating_points = map_df[list(self.label_axis)]
+
+            # machine multiple times in csv
+            if operating_points.duplicated().any():
+                _indices_to_delete.extend(map_df.index)
+                maps_with_duplicate_points += 1
+                continue
+
+            # map not complete
+            if len(map_df) != points_per_map:
+                _indices_to_delete.extend(map_df.index)
+                uncomplete_maps += 1
+
+        self.data_df = self.data_df.drop(_indices_to_delete)
+
+        print(
+            f"uncomplete maps: {uncomplete_maps}\n"
+            f"machines multiple times in csv: {maps_with_duplicate_points}\n"
+        )
+
 
     def _identify_machines_in_csv(self) -> DataFrameGroupBy:
 
-        machines = self.data_df.groupby(
+        _machines = self.data_df.groupby(
             INPUT_NEURON_LIST,
             sort=False
         )
-        self.num_machines = len(machines)
-        print(f"Found {len(machines)} machines")
-        return machines
+        print(f"Found {len(_machines)} machines")
+        return _machines
 
 
     def _identify_map_axis_values(self)-> list[list]:
 
-        axis = []
+        _axis = []
         for i in range(len(self.label_axis)):
-            axis.append(sorted(self.data_df[self.label_axis[i]].unique()))
-
-        if len(axis[0]) != len(axis[1]) != len(axis[2]):
-            raise ValueError(
-                f"Not all axis have the same number of values:\n"
-                f" x axis: {len(axis[0])}\n"
-                f" y axis: {len(axis[1])}\n"
-                f" z axies: {len(axis[2])}"
-            )
-        else:
-            self.num_mappoints_per_dim = len(axis[0])
-
-        return axis
+            _axis.append(sorted(self.data_df[self.label_axis[i]].unique()))
+        return _axis
 
 
-    @staticmethod
-    def _create_axis_indicies(three_axis: list[list]) -> list[dict]:
+    def _create_axis_indices(self) -> list[dict]:
 
-        axis_indicies = []
-        for axis in three_axis:
+        _axis_indices = []
+        for _axis in self.axis:
             idx = {
                 value: idx
-                for idx, value in enumerate(axis)
+                for idx, value in enumerate(_axis)
             }
-            axis_indicies.append(idx)
+            _axis_indices.append(idx)
+        return _axis_indices
 
-        return axis_indicies
+
+    def _create_machine_geometry_tensor(self) -> torch.Tensor:
+
+        _machine_geometry = []
+        for idx_machine, (geometry_tuple, map_df) in enumerate(self.machines):
+            _machine_geometry.append(geometry_tuple)
+        return torch.tensor(
+                _machine_geometry,
+                dtype=torch.float32
+            )
 
 
     def _create_nan_array(self) -> np.ndarray:
-
-        if self.num_machines == 0:
-            raise ValueError("No Machines found")
-        if self.num_mappoints_per_dim == 0:
-            raise ValueError("No Mappoints found")
 
         return np.full(
             (
                 self.num_machines,
                 len(OUTPUT_NEURON_LIST),
-                self.num_mappoints_per_dim,
-                self.num_mappoints_per_dim,
-                self.num_mappoints_per_dim
+                *self.map_shape
             ),
             np.nan,
             dtype=np.float32
         )
 
 
-    def _split_data(self, test_split: float = 0.2) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _create_map_tensor(self) -> torch.Tensor:
+        #go throgh each machine
+        for idx_machine, (geometry_tuple, map_df) in enumerate(self.machines):
+
+            #go through each op
+            for _, row in map_df.iterrows():
+                map_indices = [
+                    self.axis_indices[axe][row[label]] for axe, label in enumerate(self.label_axis)
+                ] #list with three indices: index on the axe "axe" of the value row[label]
+
+                #go through each channel for op
+                for idx_channel, channel in enumerate(OUTPUT_NEURON_LIST):
+                    self.nan_array[idx_machine, idx_channel, map_indices[0], map_indices[1], map_indices[2]] = row[channel]
+
+        _map_tensor = torch.tensor(self.nan_array, dtype=torch.float32)
+
+        nan_indices = torch.isnan(_map_tensor).nonzero(as_tuple=False)
+        num_nan = nan_indices.size(0)
+        if num_nan > 0:
+            raise ValueError(
+                f"Map tensor contains {num_nan} NaN values\n"
+                f"Index order (zero-based): (machine, channel, {', '.join(self.label_axis)})\n"
+                f"NaN indices: {nan_indices.tolist()}"
+            )
+        return _map_tensor
+
+
+    def _split_data(self, test_split: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+
+        if self.num_machines < 5:
+            raise ValueError(
+                f"At least 5 complete machines required, got {self.num_machines}"
+            )
 
         num_validation = int(self.num_machines * test_split)
         num_training = self.num_machines - num_validation
@@ -149,12 +207,9 @@ class DataTensor:
         train_indices = indices[:num_training]
         validation_indices = indices[num_training:]
 
-        if self.map_tensor is not None and self.machine_geomtry is not None:
-            x_train = self.machine_geomtry[train_indices]
-            x_validation = self.machine_geomtry[validation_indices]
-            y_train = self.map_tensor[train_indices]
-            y_validation = self.map_tensor[validation_indices]
-        else:
-            raise RuntimeError("Tensor is None")
+        x_train = self.machine_geometry_tensor[train_indices]
+        x_validation = self.machine_geometry_tensor[validation_indices]
+        y_train = self.map_tensor[train_indices]
+        y_validation = self.map_tensor[validation_indices]
 
         return x_train, x_validation, y_train, y_validation

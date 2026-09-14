@@ -7,7 +7,7 @@ import math
 
 from src.modules.generators.map_generator import map_generator
 from src.config.config_mcad_parameters import *
-from src.modules.process.motor_cad_processes.mcad_processing import test_boundary_conditions
+
 
 
 class AFMMachineGenerator:
@@ -203,13 +203,13 @@ class AFMMachineGenerator:
                             d_si = stator_bore_sample
                             d_sa = d_si / lambda_1_1
                             beta_pm = lambda_1_2 * 360 / 2
-                            l_pm = lambda_1_3 * g
+                            l_pm = g / lambda_1_3
                             b_s = lambda_2_1 * math.pi * d_si / s
                             t_s = b_s / lambda_2_2
                             b_tto = 0.8 * b_s
                             h_pm = lambda_2_3 * (d_sa - d_si) / 2
                             d_emb = lambda_3_1 * ((d_sa - d_si) / 2 - h_pm)
-                            l_r = lambda_3_3 * l_pm
+                            l_r = l_pm / lambda_3_3
                             d_mean = (d_sa + d_si) / 2
                             l_s = t_s + lambda_3_2 * math.pi * d_mean / p
 
@@ -236,30 +236,7 @@ class AFMMachineGenerator:
 
                                 "Motor_Length": 2*(g + l_s + l_pm) + l_r,
 
-                                "RMSCurrentDensity": math.sqrt(q_current_density**2 + d_current_density**2) / 2**0.5,
+                                "RMSCurrentDensity": math.sqrt(q_current_density**2 + d_current_density**2),# / 2**0.5,
                                 "ShaftSpeed": shaft_speed,
                                 "PhaseAdvance": math.degrees(math.atan2(-d_current_density, q_current_density)),
                             }
-
-    def geometry_test(self) -> None:
-        design_counter = 0
-        drop_counter = 0
-
-        for design in self.get_generator():
-
-            design_counter += 1
-
-            default_values = DEFAULT_VALUES.copy()
-            for key, value in design.items():
-                default_values[key] = value
-
-            parameter_name: list[str] = list(default_values.keys())
-            parameter_values: list[float] = list(default_values.values())
-
-            if not test_boundary_conditions(parameter_name, parameter_values):
-                print("________TEST FAILED FOR:____________")
-                for _var, _value in default_values.items():
-                    print(f"{_var}: {_value}")
-                drop_counter += 1
-
-        print(f"#############TEST COMPLETED: {drop_counter} from {design_counter} designs failed ##################")
