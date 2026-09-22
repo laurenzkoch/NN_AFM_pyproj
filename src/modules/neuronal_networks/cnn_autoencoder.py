@@ -1,4 +1,5 @@
 import math
+from dataclasses import dataclass
 
 import torch.nn as nn
 
@@ -71,15 +72,16 @@ class Conv3dAutoencoder(nn.Module):
         )
 
 
-
     def encode(self, x):
 
+        x = x.permute(0, 4, 1, 2, 3)
+
         x = self.encoder_conv(x)
-        #before: (batch, num_output_neurons, *map_shape)
-        #after: (batch, features[-1], *map_shape)
+        #before: (batch, *map_shape, num_output_neurons)
+        #after: (batch, *map_shape, features[-1],)
 
         x = x.flatten(start_dim=1)
-        #before: (batch, features[-1], *map_shape)
+        #before: (batch, *map_shape, features[-1])
         #after: (batch, features[-1] * math.prod(map_shape))
 
         z = self.encoder_linear(x)
@@ -100,11 +102,13 @@ class Conv3dAutoencoder(nn.Module):
             *self.map_shape
         )
         #before: (batch, features[-1] * math.prod(map_shape))
-        #after: (batch, features[-1], *map_shape)
+        #after: (batch, *map_shape, features[-1])
 
         x = self.decoder_conv(x)
-        #before: (batch, features[-1], *map_shape)
-        #after: (batch, num_output_neurons, *map_shape)
+        #before: (batch, *map_shape,features[-1])
+        #after: (batch, *map_shape, num_output_neurons)
+
+        x = x.permute(0, 2, 3, 4, 1)
 
         return x
 
@@ -115,3 +119,13 @@ class Conv3dAutoencoder(nn.Module):
         x_hat = self.decode(z)
 
         return x_hat
+
+
+@dataclass
+class TrainedCNNAutoencoder:
+    model_state_dict: dict
+    latent_dim: int
+    features: tuple[int, ...]
+    map_shape: tuple[int, ...]
+    kernel_size: int
+    activation: type[nn.Module]

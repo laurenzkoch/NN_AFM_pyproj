@@ -2,10 +2,10 @@ import copy
 from typing import Any
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
 
 from src.modules.neuronal_networks.mlp_with_torch import MLP
 from src.modules.neuronal_networks.cnn_autoencoder import Conv3dAutoencoder
-from src.modules.neuronal_networks.manipulating_data import DataTensor
 
 
 class NNTrainer:
@@ -13,7 +13,9 @@ class NNTrainer:
     def __init__(
             self,
             neuronal_network: MLP | Conv3dAutoencoder,
-            data_filename: str,
+            train_data: TensorDataset,
+            validation_data: TensorDataset,
+            batch_size: int = 1,
             trained_autoencoder: Conv3dAutoencoder | None = None,
             learning_rate: float = 1e-3,
             weight_decay: float = 1e-4,
@@ -40,10 +42,19 @@ class NNTrainer:
         self._move_to_device(self.trained_autoencoder)
         self._freeze_autoencoder()
 
-        # load data
-        data = DataTensor(filename=data_filename)
-        self.train_data = data.dataloader_train
-        self.validation_data = data.dataloader_validation
+        #data
+        self.dataloader_train = DataLoader(
+            train_data,
+            batch_size=batch_size,
+            shuffle=True
+        )
+
+        self.dataloader_validation = DataLoader(
+            validation_data,
+            batch_size=batch_size,
+            shuffle=False
+        )
+
 
         #loss function
         self.criterion = nn.MSELoss()
@@ -87,7 +98,7 @@ class NNTrainer:
                 raise ValueError(
                     f"Expected 5D tensor, got shape {large_map_pred.shape}"
                 )
-            map_shape = tuple(large_map_pred.shape[2:])
+            map_shape = tuple(large_map_pred.shape[1:-1])
 
             indices = []
             for axis_size in map_shape:
@@ -102,9 +113,9 @@ class NNTrainer:
 
             small_map_pred = (
                 large_map_pred
-                .index_select(2, sparse_indices[0])
-                .index_select(3, sparse_indices[1])
-                .index_select(4, sparse_indices[2])
+                .index_select(1, sparse_indices[0])
+                .index_select(2, sparse_indices[1])
+                .index_select(3, sparse_indices[2])
             )
         return small_map_pred
 
@@ -115,22 +126,30 @@ class NNTrainer:
     ) -> float:
 
         sum_batch_loss = 0.0
+        num_samples = 0
 
         if true_for_training:
-            dataloader = self.train_data
+            dataloader = self.dataloader_train
         else:
-            dataloader = self.validation_data
+            dataloader = self.dataloader_validation
 
-        for geometry_batch, map_batch in dataloader:
+        for geometry_batch, op_batch, map_batch in dataloader:
             geometry_batch = self._move_to_device(geometry_batch)
+            op_batch = self._move_to_device(op_batch)
             map_batch = self._move_to_device(map_batch)
 
             if true_for_training:
                 self.optimizer.zero_grad()
 
             if isinstance(self.neuronal_network, MLP):
-                map_pred = self.neuronal_network(geometry_batch)
-                map_pred = map_pred.view_as(map_batch)
+                mlp_input = torch.cat(
+                    (
+                        geometry_batch,
+                        op_batch
+                    ),
+                    dim=-1
+                )
+                map_pred = self.neuronal_network(mlp_input)
                 if self.trained_autoencoder is not None:
                     map_pred = self._autoencoder_prediction(map_pred)
             elif isinstance(self.neuronal_network, Conv3dAutoencoder) and self.trained_autoencoder is None:
@@ -138,15 +157,23 @@ class NNTrainer:
             else:
                 raise RuntimeError("Unknown neuronal network type")
 
+            if map_pred.shape != map_batch.shape:
+                raise ValueError(
+                    f"Prediction shape {map_pred.shape} "
+                    f"does not match target shape {map_batch.shape}"
+                )
+
             loss = self.criterion(map_batch, map_pred)
 
             if true_for_training:
                 loss.backward()
                 self.optimizer.step()
 
-            sum_batch_loss += (loss.item() * map_batch.size(0))
+            batch_size = map_batch.size(0)
+            sum_batch_loss += loss.item() * batch_size
+            num_samples += batch_size
 
-        mean_total_loss = sum_batch_loss / len(dataloader.dataset)
+        mean_total_loss = sum_batch_loss / num_samples
 
         return mean_total_loss
 

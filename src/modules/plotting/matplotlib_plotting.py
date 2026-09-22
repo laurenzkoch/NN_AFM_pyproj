@@ -30,7 +30,7 @@ def add_scatter_to_fig(
         colors: str = "red",
         marker: str = "x",
         label: str = ""
-) -> Axes:
+) -> None:
 
     if z_column is not None:
         ax.scatter(
@@ -50,7 +50,6 @@ def add_scatter_to_fig(
             label=label
         )
 
-    return ax
 
 def add_plot_to_fig(
         ax: Axes,
@@ -58,7 +57,7 @@ def add_plot_to_fig(
         y_column: pd.Series | Any,
         colors: str | tuple[float, float, float, float] = "r",
         label: str = ""
-) -> Axes:
+) -> None:
 
     ax.plot(
         x_column,
@@ -73,7 +72,6 @@ def add_plot_to_fig(
         alpha=0.5
     )
 
-    return ax
 
 
 def add_text_to_fig(
@@ -81,7 +79,7 @@ def add_text_to_fig(
         text: str,
         x: float = 1.1,
         y: float = 0.8,
-) -> Axes:
+) -> None:
 
     ax.text(
         x=x,
@@ -97,16 +95,16 @@ def add_text_to_fig(
             alpha=0.8
         )
     )
-    return ax
 
 
-def add_legend_to_fig(ax: Axes, loc: str = "upper left") -> Axes:
+
+def add_legend_to_fig(ax: Axes, loc: str = "upper left") -> None:
     ax.legend(
         loc=loc,
         bbox_to_anchor=(1.1, 1.0),
         borderaxespad=0.0
     )
-    return ax
+
 
 def save_plot(fig: Figure, path_plots: str | Path, filename: str):
     path_plots = PATH_DATA_PLOTS / path_plots

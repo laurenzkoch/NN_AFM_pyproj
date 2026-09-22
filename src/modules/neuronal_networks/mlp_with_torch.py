@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
@@ -76,4 +77,11 @@ class MLP(nn.Module):
 
         return self.network(x)
 
+@dataclass
+class TrainedMLP:
+    model_state_dict: dict
+    num_input_neurons: int
+    num_output_neurons: int
+    hidden_layer_neurons: tuple[int, ...]
+    activation: type[nn.Module]
 

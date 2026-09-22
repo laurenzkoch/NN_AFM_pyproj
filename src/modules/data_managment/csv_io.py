@@ -1,21 +1,24 @@
-
+import logging
 from pathlib import Path
 import csv
 import pandas as pd
 
+logger = logging.getLogger(__name__)
 
-def create_csv_file(path: Path, columns_list: list[str]):
+def create_csv_file(path: Path, columns_list: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    if path.exists():
+        logger.warning("CSV file already existing. File will not be overwritten.")
+        return
+
     with open(path, mode="w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file, delimiter=";", quotechar='"')
         writer.writerow(columns_list)
 
 
-def import_data_from_csv(
-        path_data: Path,
-        filename: str
-) -> pd.DataFrame:
-    data_df = pd.read_csv(path_data / filename, encoding='utf-8', sep=";", decimal=",")
+def import_data_from_csv(path_file: Path) -> pd.DataFrame:
+    data_df = pd.read_csv(path_file, encoding='utf-8', sep=";", decimal=",")
     return data_df
 
 

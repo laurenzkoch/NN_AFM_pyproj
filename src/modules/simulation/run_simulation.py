@@ -1,39 +1,49 @@
+import logging
+
 import numpy as np
-from typing import Generator
+from typing import Iterable
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from src.modules.data_managment.csv_io import *
+from src.config.config_mcad_parameters import *
+from src.modules.data_managment.csv_io import import_data_from_csv, write_row_in_csv
 from src.modules.process.motor_cad_processes import mcad_instance_handling
+from src.config.config_paths import *
 
+logger = logging.getLogger(__name__)
 
 
 def _func(
     parameter_dict: dict[str, float],
 ) -> tuple[list[float] | None, bool]:
 
-    mcad = mcad_instance_handling.get_mcad_instance()
+    try:
+        mcad = mcad_instance_handling.get_mcad_instance()
 
-    for name, value in parameter_dict.items():
+        for name, value in parameter_dict.items():
 
-        # np.float64, np.int64 etc. -> Python float/int
-        if isinstance(value, np.generic):
-            value = value.item()
+            # np.float64, np.int64 etc. -> Python float/int
+            if isinstance(value, np.generic):
+                value = value.item()
 
-        if name == "Pole_Number":
-            tppc = mcad.get_value_from_mcad("TorquePointsPerCycle")
-            mesh_points = value / 2 * tppc
-            if mesh_points < 360:
-                mesh_points = 4 * mesh_points
-            mcad.set_value_in_mcad(variable_name="AirgapMeshPoints_mesh", value=mesh_points)
-            mcad.set_value_in_mcad(variable_name="AirgapMeshPoints_layers", value=mesh_points)
+            if name == "Pole_Number":
+                tppc = mcad.get_value_from_mcad("TorquePointsPerCycle")
+                mesh_points = value / 2 * tppc
+                if mesh_points < 360:
+                    mesh_points = 4 * mesh_points
+                mcad.set_value_in_mcad(variable_name="AirgapMeshPoints_mesh", value=mesh_points)
+                mcad.set_value_in_mcad(variable_name="AirgapMeshPoints_layers", value=mesh_points)
 
-        mcad.set_value_in_mcad(name, value)
+            mcad.set_value_in_mcad(name, value)
 
-    return mcad.execute_mcad_simulation()
+        return mcad.execute_mcad_simulation()
+
+    except Exception:
+        mcad_instance_handling.shutdown_mcad_instance()
+        raise
 
 
 def run_simulation_pool(
-        machine_generator_instance: Generator[dict[str, float], None, None],
+        batch_machine_generator_instance: Iterable[dict[str, float]],
         progress_queue,
         csv_path: Path,
         num_workers: int,
@@ -44,12 +54,50 @@ def run_simulation_pool(
         initializer=mcad_instance_handling.init_mcad_instance
     ) as executor:
 
-        futures = [
-            executor.submit(
-                _func,
-                parameter_dict=parameter_dict,
-            ) for parameter_dict in machine_generator_instance
-        ]
+        data_df = import_data_from_csv(csv_path)
+
+        batch = list(batch_machine_generator_instance)
+
+        if not batch:
+            return
+
+        parameter_names = tuple(batch[0].keys())
+
+        known_points = {
+            tuple(row)
+            for row in data_df[list(parameter_names)].itertuples(
+                index=False,
+                name=None,
+            )
+        }
+
+        futures = []
+
+        for parameter_dict in batch_machine_generator_instance:
+
+            point = tuple(
+                parameter_dict[name]
+                for name in parameter_names
+            )
+
+            if any(
+                    all(
+                        abs(a - b) <= 1e-4
+                        for a, b in zip(point, known_point)
+                    )
+                    for known_point in known_points
+            ):
+                progress_queue.put(("point existing", None))
+                continue
+
+            known_points.add(point)
+
+            futures.append(
+                executor.submit(
+                    _func,
+                    parameter_dict=parameter_dict,
+                )
+            )
 
         try:
             for future in as_completed(futures):
@@ -60,23 +108,14 @@ def run_simulation_pool(
                     write_row_in_csv(csv_path, values_row)
         except Exception as exc:
 
-            print(f"Simulation pool failed: {exc!r}")
+            logger.error(f"Simulation pool failed: {exc!r}")
 
             for future in futures:
                 future.cancel()
 
-            executor.terminate_workers()
+            executor.shutdown(
+                wait=True,
+                cancel_futures=True,
+            )
 
             raise
-
-        progress_queue.put(("DONE", None))
-
-
-
-
-
-
-
-
-
-

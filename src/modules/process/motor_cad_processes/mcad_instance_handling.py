@@ -1,16 +1,22 @@
+
+import os
+import logging
+import atexit
+from pathlib import Path
+
 from src.modules.process.motor_cad_processes import mcad_processing
 from src.config.config_paths import PATH_MCAD_BASEFILE
 from src.modules.data_managment.temp_files import create_temp_file_copy
 
-import atexit
-from pathlib import Path
-
+logger = logging.getLogger(__name__)
 
 _mcad_instance: mcad_processing.MCADProcessor | None = None
 
 
 def init_mcad_instance() -> None:
     global _mcad_instance
+
+    logger.info(f"Initialization MCAD instance: Connection to licence server should have been initialized")
 
     atexit.register(shutdown_mcad_instance)
 
@@ -30,8 +36,11 @@ def get_mcad_instance() -> mcad_processing.MCADProcessor:
 
 def shutdown_mcad_instance() -> None:
     global _mcad_instance
+
+    logger.info(f"Shutting down MCAD in worker PID {os.getpid()}")
+
     if _mcad_instance is not None:
-        _mcad_instance.__exit__(None, None, None)
+        _mcad_instance.close()
         _mcad_instance = None
 
 

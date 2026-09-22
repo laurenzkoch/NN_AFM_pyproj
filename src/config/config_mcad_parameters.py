@@ -1,5 +1,4 @@
 
-
 OUTPUT_NEURON_LIST = [
     "ShaftTorque",
     "SystemEfficiency",

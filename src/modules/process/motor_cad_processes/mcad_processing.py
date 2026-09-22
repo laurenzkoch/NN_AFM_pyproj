@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import logging
 import time
 import math
 
@@ -6,9 +8,11 @@ import ansys.motorcad.core as pymotorcad
 from src.config.config_mcad_parameters import *
 from src.config.config_paths import *
 
+logger = logging.getLogger(__name__)
+
 def _print_design(parameter_list: list[str], value_list: list[float | int]) -> None:
     for _var, _value in zip(parameter_list, value_list):
-        print(f"{_var}: {_value}")
+        print(f"\t\t{_var}: {_value}")
     print("__________________________________________________")
 
 def test_boundary_conditions(parameter_list: list[str], values: list[float]) -> bool:
@@ -68,61 +72,61 @@ def test_boundary_conditions(parameter_list: list[str], values: list[float]) -> 
 
     # radial - stator
     if stator_bore >= stator_lam_dia:
-        print("Warning: Stator bore is greater than stator lamination diameter.")
+        logger.warning("Warning: Stator bore is greater than stator lamination diameter.")
         return False
     if stator_bore <= shaft_dia:
-        print("Warning: Stator bore is less than shaft diameter.")
+        logger.warning("Warning: Stator bore is less than shaft diameter.")
         return False
 
     # radial - rotor
     if dia_mag_i <= shaft_dia:
-        print("Warning: Magnets too thick for rotor diameter or rotor diameter is less than shaft diameter.")
+        logger.warning("Warning: Magnets too thick for rotor diameter or rotor diameter is less than shaft diameter.")
         return False
     if shaft_hole_diameter >= stator_lam_dia:
-        print("Warning: Shaft hole diameter is greater than stator lamination diameter.")
+        logger.warning("Warning: Shaft hole diameter is greater than stator lamination diameter.")
         return False
 
 
     # axial
     if motor_length < (2 * (stator_lam_length + airgap + magnet_length) + rotor_lam_length) -TOL:
-        print(f"Warning: Motor length is too short.")
+        logger.warning(f"Warning: Motor length is too short.")
         return False
     if slot_depth >= stator_lam_length:
-        print("Warning: Slot depth is greater than stator lamination length.")
+        logger.warning("Warning: Slot depth is greater than stator lamination length.")
         return False
     if rotor_lam_length < 0.25 or magnet_length < 0.25:
-        print("Axial length of rotor/stator/magnets too short")
+        logger.warning("Axial length of rotor/stator/magnets too short")
         return False
 
 
     # winding
     if not winding_ratio.is_integer() or winding_ratio < 1:
-        print(
+        logger.warning(
             "Warning: Winding is not feasible. "
             f"Slot_Number / MagPhases / gcd(Pole_Number, Slot_Number) = "
             f"{slot_number} / {magphases} / {winding_gcd} = {winding_ratio:.6f}."
         )
         return False
     if slot_width >= stator_width_per_slot:
-        print("Warning: Slot width is greater than stator width per slot.")
+        logger.warning("Warning: Slot width is greater than stator width per slot.")
         return False
     if tooth_tip_depth >= slot_depth:
-        print("Warning: Tooth tip depth is greater than stator tip depth.")
+        logger.warning("Warning: Tooth tip depth is greater than stator tip depth.")
         return False
     if slot_opening > slot_width:
-        print("Warning: Slot opening is greater than slot width.")
+        logger.warning("Warning: Slot opening is greater than slot width.")
         return False
 
 
     # magnet length
     if activ_length <= 0:
-        print("Warning: Magnet length is less than 0")
+        logger.warning("Warning: Magnet length is less than 0")
         return False
 
 
     # operation points
     if phaseadvanced < 0 or phaseadvanced >= 90:
-        print("Warning: Phase advance is out of bounds. It should be in the range [0, 90).")
+        logger.warning("Warning: Phase advance is out of bounds. It should be in the range [0, 90).")
         return False
 
     return True
@@ -133,37 +137,24 @@ class MCADProcessor:
 
     def __init__(self) -> None:
         pymotorcad.set_motorcad_exe(str(PATH_MCAD_EXE))
-        self.mcad_process: pymotorcad.MotorCAD | None = None
+        self.mcad_process: pymotorcad.MotorCAD = pymotorcad.MotorCAD()
 
     def start(self) -> None:
-        if self.mcad_process is not None:
-            return
+        self.mcad_process.set_visible(True)
 
-        print(
-            "-----------Starting MCAD: "
-            "Connection to licence server should have been initialized----------"
-        )
-
-        self.mcad_process = pymotorcad.MotorCAD()
-        if self.mcad_process is not None:
-            self.mcad_process.set_visible(True)
-        else:
-            raise RuntimeError("Failed to start MotorCAD process.")
+    def close(self) -> None:
+        try:
+            self.mcad_process.quit()
+            time.sleep(2)
+        except Exception as exc:
+            logger.error(f"Error while closing MCAD: {exc}")
 
     def __enter__(self) -> 'MCADProcessor':
         self.start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        try:
-            if self.mcad_process is not None:
-                try:
-                    self.mcad_process.quit()
-                    time.sleep(2)
-                finally:
-                    self.mcad_process = None
-        except Exception as exc:
-            print(f"Error while closing MCAD: {exc}")
+        self.close()
         return None
 
 
@@ -175,42 +166,33 @@ class MCADProcessor:
                 f"File not found: {file_path}"
             )
 
-        if self.mcad_process is not None:
-            self.mcad_process.load_from_file(str(file_path))
-        else:
-            raise RuntimeError("MotorCAD process is not initialized. Please start the process first.")
+        self.mcad_process.load_from_file(str(file_path))
+
 
 
     def set_value_in_mcad(self, variable_name: str, value: float) -> None:
         try:
-            if self.mcad_process is not None:
-                self.mcad_process.set_variable(variable_name, value)
-            else:
-                raise RuntimeError("MotorCAD process is not initialized. Please start the process first.")
+            self.mcad_process.set_variable(variable_name, value)
         except Exception as exc:
             raise ValueError(f"Failed to set variable {variable_name} to value {value}.") from exc
 
 
     def get_value_from_mcad(self, variable_name: str) -> float:
         try:
-            if self.mcad_process is not None:
-                return float(self.mcad_process.get_variable(variable_name))
-            else:
-                raise RuntimeError("MotorCAD process is not initialized. Please start the process first.")
+            return float(self.mcad_process.get_variable(variable_name))
         except Exception as exc:
             raise ValueError(f"Failed to get variable {variable_name} from MotorCAD.") from exc
 
 
     def do_calculation(self) -> bool:
         try:
-            if self.mcad_process is not None:
-                self.mcad_process.do_magnetic_calculation()
-            else:
-                raise RuntimeError("MotorCAD process is not initialized. Please start the process first.")
+            self.mcad_process.do_magnetic_calculation()
             return True
-        except Exception as exc:
-            print("Warning: Motor-CAD rejected this design point.")
-            print(f"Motor-CAD error: {exc}")
+        except pymotorcad.MotorCADError as exc:
+            logger.error(
+                "Motor-CAD calculation failed: %s",
+                exc
+            )
             return False
 
 
@@ -234,11 +216,11 @@ class MCADProcessor:
                 return value_row, True
 
             else:
-                print("___________Calculation failed_____________________")
+                logger.error("Calculation failed")
                 _print_design(all_parameters, all_values)
                 return None, False
 
         else:
-            print("_______________Failed boundary check:_________________ ")
+            logger.error("Failed boundary check:")
             _print_design(all_parameters, all_values)
             return None, False
