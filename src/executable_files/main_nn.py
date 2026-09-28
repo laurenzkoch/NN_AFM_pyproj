@@ -15,7 +15,7 @@ from src.config.config_paths import *
 ########################################################################################################################
 # load data
 
-file = "Results_EMagnetic_simulation_3_3_5_18.09.2026_13-52-26_CEST.csv"
+file = "Results_EMagnetic_simulation_3_3_5_GenType-v1_18.09.2026_13-52-26_CEST.csv"
 data = DataTensor(filename=file)
 
 with open(PATH_DATA_TRAINED_NN / "data.pkl", "wb") as file:
@@ -38,7 +38,7 @@ dataset_validation_data = TensorDataset(
 # MLP ONLY
 
 mlp = MLP(
-    num_input_neurons=len(INPUT_NEURON_LIST) + 3,
+    num_input_neurons=len(INPUT_NEURON),
     num_output_neurons=len(OUTPUT_NEURON_LIST),
     hidden_layer_neurons=(64, 32, 16),
     activation=nn.ReLU
@@ -47,17 +47,13 @@ mlp_trainer = NNTrainer(
     neuronal_network=mlp,
     train_data=dataset_train_data,
     validation_data=dataset_validation_data,
-    learning_rate=0.001,
-    weight_decay=0.0001,
-    num_epochs=1000,
-    patience=50,
 )
 trained_mlp = mlp_trainer.training_process()
 
 torch.save(
     TrainedMLP(
         model_state_dict=trained_mlp.state_dict(),
-        num_input_neurons=len(INPUT_NEURON_LIST) + 3,
+        num_input_neurons=len(INPUT_NEURON),
         num_output_neurons=len(OUTPUT_NEURON_LIST),
         hidden_layer_neurons=(64, 32, 16),
         activation=nn.ReLU
@@ -82,10 +78,6 @@ autoencoder_trainer = NNTrainer(
     neuronal_network=autoencoder,
     train_data=dataset_train_data,
     validation_data=dataset_validation_data,
-    learning_rate=0.001,
-    weight_decay=0.0001,
-    num_epochs=1000,
-    patience=50,
 )
 trained_autoencoder = autoencoder_trainer.training_process()
 
@@ -106,20 +98,9 @@ torch.save(
 ########################################################################################################################
 """
 
-model_path = PATH_DATA / "trained_autoencoder"
-model_path.mkdir(
-    parents=True,
-    exist_ok=True
-)
-torch.save(
-    trained_autoencoder.state_dict(),
-    model_path / "trained_autoencoder.pt"
-)
-
-
 
 mlp = MLP(
-    num_input_neurons=len(INPUT_NEURON_LIST) + 3,
+    num_input_neurons=len(SIM_IN_GEO_PARAMETERS) + 3,
     num_output_neurons=15,
     hidden_layer_neurons=(64, 32, 16),
     activation=nn.ReLU

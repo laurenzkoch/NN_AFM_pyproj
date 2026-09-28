@@ -7,33 +7,34 @@ OUTPUT_NEURON_LIST = [
     "MagnetLoss",
     "StatorIronLoss_Total",
     "RotorIronLoss_Total",
-    #"WedgeLoss",
 ]
 
-INPUT_NEURON_LIST = [
+SIM_IN_GEO_PARAMETERS = [
 
-    "AFM_D_Rotor",
-    "Stator_Lam_Dia",
-    "Stator_Bore",
-    "Airgap",
     "Pole_Number",
-
     "Slot_Number",
+    "Airgap",
+    "Stator_Bore",
+
+    "Stator_Lam_Dia",
+    "AFM_D_Rotor",
+
+    "Magnet_Arc_[ED]",
+    "Magnet_Length",
+    "Magnet_Thickness",
+
+    "Slot_Depth",
     "Slot_Width",
     "Slot_Opening",
-    "Slot_Depth",
 
-    "Motor_Length",
+    "Magnet_Embed_Depth",
     "Rotor_Lam_Length",
     "Stator_Lam_Length",
+    "Motor_Length",
 
-    "Magnet_Length",
-    "Magnet_Embed_Depth",
-    "Magnet_Thickness",
-    "Magnet_Arc_[ED]",
 ]
 
-OP_PARAMETERS = [
+SIM_IN_OP_PARAMETERS = [
     "ShaftSpeed",
     "RMSPhaseCurrent_D",
     "RMSPhaseCurrent_Q",
@@ -41,6 +42,9 @@ OP_PARAMETERS = [
     "PeakCurrent",
     "PhaseAdvance",
 ]
+
+
+SIM_INPUT_PARAMETERS = SIM_IN_GEO_PARAMETERS + SIM_IN_OP_PARAMETERS + OUTPUT_NEURON_LIST
 
 DEFAULT_VALUES = {
 
@@ -91,14 +95,43 @@ DEFAULT_VALUES = {
     "DCBusVoltage": 800,
 }
 
+LAMBDA_LIST = [
+    "lambda_1_1",
+    "lambda_1_2",
+    "lambda_1_3",
+    "lambda_2_1",
+    "lambda_2_2",
+    "lambda_2_3",
+    "lambda_3_1",
+    "lambda_3_2",
+    "lambda_3_3",
+]
+
+GEO_PARAMETERS = [
+    "Slot_Number",
+    "Pole_Number",
+    "Airgap",
+    "Stator_Bore",
+]
+
+OP_NEURONS = [
+    "ShaftSpeed",
+    "RMSPhaseCurrent_D_density",
+    "RMSPhaseCurrent_Q_density",
+]
+
+MACHINE_DEFINITION = GEO_PARAMETERS + LAMBDA_LIST
+INPUT_NEURON = MACHINE_DEFINITION + OP_NEURONS
+
+
 D_CURRENT_DENSITY: tuple[float, float] = (-50, 0)
 Q_CURRENT_DENSITY: tuple[float, float] = (5, 100)
-#PHASE_ADVANCE: tuple[float, float] = (0, 85)
 SHAFT_SPEED: tuple[float, float] = (1, 5000)
 
+POLE_NUMBER: tuple[int, int] = (2, 20)
+SLOT_NUMBER: tuple[int, int] = (3, 30)
 AIRGAP: tuple[float, float] = (0.25, 5)
 STATOR_BORE: tuple[float, float] = (DEFAULT_VALUES["Shaft_Dia"]+1, 100)
-SLOT_DEPTH: tuple[float, float] = (4, 100)
 
 LAMBDA_1_1: tuple[float, float] = (0.2, 0.8)    # radial:       lambda_1_1 = D_Si / D_Sa
 LAMBDA_1_2: tuple[float, float] = (0.5, 0.9)    # tangential:   lambda_1_2 = beta_PM / beta_p = 2 * Magnet_Arc_[ED] / 360

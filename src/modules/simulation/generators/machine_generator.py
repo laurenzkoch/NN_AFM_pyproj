@@ -5,7 +5,7 @@ from scipy.optimize import linear_sum_assignment
 from scipy.stats import qmc
 import math
 
-from src.modules.generators.map_generator import map_generator
+from src.modules.simulation.generators.map_generator import map_generator
 from src.config.config_mcad_parameters import *
 
 
@@ -54,8 +54,8 @@ class AFMMachineGenerator:
             raise ValueError("num_of_sub_designs must be >= 1")
 
         pairs = []
-        for slot in range(3, 31, 3):
-            for pole in range(2, 21, 2):
+        for slot in range(SLOT_NUMBER[0], SLOT_NUMBER[1]+1, 3):
+            for pole in range(POLE_NUMBER[0], POLE_NUMBER[1]+1, 2):
                 gcd = math.gcd(slot, pole)
                 if slot % (3*gcd) == 0 and slot > pole and slot / gcd <= 6:
                     pairs.append((slot, pole))
@@ -211,7 +211,7 @@ class AFMMachineGenerator:
             d=1,
             lower_bounds=np.array([AIRGAP[0]]),
             upper_bounds=np.array([AIRGAP[1]]),
-            seed=85
+            seed=10
         )
 
         slot_pole_samples: np.ndarray = self._find_pole_slot_pairs()

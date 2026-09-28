@@ -1,11 +1,12 @@
 import copy
-from typing import Any
+
+import numpy as np
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.modules.neuronal_networks.mlp_with_torch import MLP
 from src.modules.neuronal_networks.cnn_autoencoder import Conv3dAutoencoder
+from src.modules.plotting.matplotlib_plotting import *
 
 
 class NNTrainer:
@@ -15,11 +16,11 @@ class NNTrainer:
             neuronal_network: MLP | Conv3dAutoencoder,
             train_data: TensorDataset,
             validation_data: TensorDataset,
-            batch_size: int = 1,
+            batch_size: int = 1000,
             trained_autoencoder: Conv3dAutoencoder | None = None,
-            learning_rate: float = 1e-3,
-            weight_decay: float = 1e-4,
-            num_epochs: int = 1000,
+            learning_rate: float = 1e-3, #not smaller than 0.00001
+            weight_decay: float = 1e-3, #
+            num_epochs: int = 2000,
             patience: int = 50,
     ) -> None:
 
@@ -57,7 +58,7 @@ class NNTrainer:
 
 
         #loss function
-        self.criterion = nn.MSELoss()
+        self.criterion = torch.nn.MSELoss()
 
         #optimizer
         self.optimizer = torch.optim.Adam(
@@ -69,6 +70,8 @@ class NNTrainer:
         self.num_epochs = num_epochs
         self.validation_loss = 0
         self.train_loss = 0
+        self.train_loss_vector: list[float] = []
+        self.validation_loss_vector: list[float] = []
         self.patience = patience
         self.best_model_state = None
         self.best_validation_loss = float("inf")
@@ -181,12 +184,14 @@ class NNTrainer:
     def _train(self) -> None:
         self.neuronal_network.train()
         self.train_loss = self._show_nn_batches(true_for_training=True)
+        self.train_loss_vector.append(self.train_loss)
 
 
     @torch.no_grad()
     def _validation(self) -> None:
         self.neuronal_network.eval()
         self.validation_loss = self._show_nn_batches(true_for_training=False)
+        self.validation_loss_vector.append(self.validation_loss)
 
 
     def _early_stopping(self) -> bool:
@@ -211,29 +216,60 @@ class NNTrainer:
 
     def training_process(self) -> MLP | Conv3dAutoencoder:
 
-        print("###START TRAINING###")
-
+        print("------------------------------------------------")
+        print("### START TRAINING ###")
         for epoch in range(self.num_epochs):
             self._train()
             self._validation()
             if self._early_stopping():
                 print(f"Early stopping after {epoch + 1} epochs.")
                 break
+        self._plot_loss_curve()
         if self.best_model_state is not None:
             self.neuronal_network.load_state_dict(
                 self.best_model_state
             )
         print(
-            f"###END OF TRAINING###\n"
+            f"### END OF TRAINING ###\n"
             f"Train loss: {self.best_train_loss}\n"
             f"Validation loss: {self.best_validation_loss}\n"
-            f"######################"
+            f"------------------------------------------------"
         )
 
         return self.neuronal_network
 
 
+    def _plot_loss_curve(
+            self,
+    ) -> None:
 
+        fig, ax = create_fig_matplotlib(
+            xlabel=f"Epoch",
+            ylabel=f"MSE loss normalized",
+            title="MSE Loss",
+
+        )
+
+        add_plot_to_fig(
+            ax=ax,
+            x_column=np.arange(1, len(self.train_loss_vector) + 1),
+            y_column=self.train_loss_vector,
+            colors="b",
+            label="train loss",
+        )
+        add_plot_to_fig(
+            ax=ax,
+            x_column=np.arange(1, len(self.validation_loss_vector) + 1),
+            y_column=self.validation_loss_vector,
+            colors="r",
+            label="validation loss",
+        )
+        add_legend_to_fig(ax=ax)
+        save_plot(
+            fig,
+            path_plots=PATH_DATA_PLOTS,
+            filename=f"mse_loss.png"
+        )
 
 
 

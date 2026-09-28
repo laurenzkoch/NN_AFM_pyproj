@@ -12,7 +12,7 @@ from src.config.config_mcad_parameters import *
 
 from src.modules.process.resources import determine_number_of_kernels
 from src.modules.simulation.userinterface import MyUserInterface
-from src.modules.generators.machine_generator import AFMMachineGenerator
+from src.modules.simulation.generators.machine_generator import AFMMachineGenerator
 from src.modules.simulation.run_simulation import run_simulation_pool
 from src.modules.data_managment.file_io import delete_folder
 from src.modules.process.eduvpn import EDUVPNProcessor
@@ -69,20 +69,18 @@ class SimulationPipeline:
 
         create_csv_file(
             path=self.csv_filepath,
-            columns_list=INPUT_NEURON_LIST + OP_PARAMETERS + OUTPUT_NEURON_LIST
+            columns_list=SIM_INPUT_PARAMETERS
         )
 
         self._initialize_simulation_thread()
         self._initialize_ui()
         self._initialize_progress_tracking()
-        self._start_threads()
+        self._run_ui()
 
     def stop(self) -> None:
         delete_folder(PATH_MCAD_DATA / PATH_TEMP_FILES)
         if self.eduvpn_processor is not None:
             self.eduvpn_processor.stop()
-        if self.ui is not None and self.ui.root is not None:
-            self.ui.root.destroy()
 
 
     def __enter__(self) -> "SimulationPipeline":
@@ -100,7 +98,7 @@ class SimulationPipeline:
             case "v1":
                 return self.num_base_designs * self.num_lam_designs**3 * self.num_operation_points_per_dim**3
             case "v2":
-                return self.num_base_designs * self.num_lam_designs ** 3 * self.num_operation_points_per_dim**3
+                return self.num_base_designs * self.num_lam_designs * self.num_operation_points_per_dim**3
             case _:
                 raise ValueError("Invalid generator type.")
 
@@ -145,7 +143,7 @@ class SimulationPipeline:
         )
 
 
-    def _start_threads(self) -> None:
+    def _run_ui(self) -> None:
 
         if self.ui is not None and self.ui.root is not None:
             self.ui.root.mainloop()
@@ -202,8 +200,6 @@ class SimulationPipeline:
                                 )
                             )
                             self.ui.start_button_sim.config(text="Simulation Finished", state="disabled")
-                            if self.autostart:
-                                self.ui.root.destroy()
                             return
                         case "Starting MCAD":
                             self.ui.info_label.config(text="Starting MCAD...")

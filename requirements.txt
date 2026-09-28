@@ -1,6 +1,24 @@
-pandas
-matplotlib
-numpy
-plotly
-scikit-learn
-ansys-motorcad-core
+# Shared Python requirements, also installed by environment.yml.
+# Python 3.14.4 and Tk/Tkinter are supplied by the Python/Conda installation.
+# Motor-CAD and eduVPN must be installed separately.
+
+# Data processing, sampling and plotting
+numpy==2.4.4
+scipy==1.17.1
+pandas==3.0.2
+matplotlib==3.10.9
+plotly==6.7.0
+seaborn==0.13.2
+
+# Neural networks and Motor-CAD integration
+scikit-learn==1.8.0
+torch==2.13.0
+ansys-motorcad-core==0.8.6
+
+# Python time-zone data for zoneinfo on Windows
+tzdata
+
+# HTTP stack; environment.yml installs these with Conda before running pip.
+requests==2.34.2
+idna
+charset-normalizer

@@ -208,7 +208,7 @@ class MCADProcessor:
         if test_boundary_conditions(all_parameters, all_values):
 
             if self.do_calculation():
-                value_row = get_values(INPUT_NEURON_LIST + OP_PARAMETERS + OUTPUT_NEURON_LIST)
+                value_row = get_values(SIM_INPUT_PARAMETERS)
 
                 #print("___________Calculation ran sucessfully___________")
                 #_print_design(all_parameters, all_values)

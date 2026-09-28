@@ -42,6 +42,8 @@ def plot_pred_vs_sim(
 
         datasets_points = []
         rs = []
+        r2 = []
+        diff = []
         for map_sim, map_pred in zip(map_sim_list, map_pred_list):
             sim_points = (
                 map_sim[:,:,:,:, idx_channel] # all points: map_sim[:,:,:,:, idx_channel]
@@ -60,6 +62,11 @@ def plot_pred_vs_sim(
             datasets_points.append(
                 (sim_points, pred_points)
             )
+
+            diff.append(torch.abs(map_sim[:,:,:,:, idx_channel] - map_pred[:,:,:,:, idx_channel]))
+            ss_res = torch.sum((map_sim[:,:,:,:, idx_channel] - map_pred[:,:,:,:, idx_channel]) ** 2)
+            ss_tot = torch.sum((map_sim[:,:,:,:, idx_channel] - torch.mean(map_sim[:,:,:,:, idx_channel])) ** 2)
+            r2.append(1 - ss_res / ss_tot)
 
             rs.append(
                 torch.corrcoef(
@@ -107,8 +114,14 @@ def plot_pred_vs_sim(
         add_legend_to_fig(ax=ax)
         add_text_to_fig(
             ax=ax,
-            text=f"R_train = {rs[0]:.3f}\n"
-                 f"R_validation = {rs[1]:.3f}\n"
+            text=f"R train = {rs[0]:.3f}\n"
+                 f"R validation = {rs[1]:.3f}\n"
+                 f"R^2 train = {r2[0]:.3f}\n"
+                 f"R^2 validation = {r2[1]:.3f}\n"
+                 f"Min. Error train = {diff[0].min().item():.3f} {unit}\n"
+                 f"Max. Error train = {diff[0].max().item():.3f} {unit}\n"
+                 f"Min. Error validation = {diff[1].min().item():.3f} {unit}\n"
+                 f"Max. Error validation = {diff[1].max().item():.3f} {unit}\n"
                  #f"Operation Point\n"
                  #f"i_d = {ref_op[0]}\n"
                  #f"i_q =  {ref_op[1]}\n"

@@ -5,7 +5,7 @@ import torch
 import pandas as pd
 from pandas.core.groupby.generic import DataFrameGroupBy
 
-from config.config_mcad_parameters import OUTPUT_NEURON_LIST, INPUT_NEURON_LIST
+from config.config_mcad_parameters import *
 from modules.data_managment.csv_io import import_data_from_csv
 from config.config_paths import *
 
@@ -15,7 +15,7 @@ class DataTensor:
     def __init__(
             self,
             filename: str,
-            label_axis: tuple[str, str, str] = ("RMSPhaseCurrent_D_density", "RMSPhaseCurrent_Q_density", "ShaftSpeed"),
+            label_axis: tuple[str, str, str] = OP_NEURONS,
     ) -> None:
 
         self.data_df = self._get_data(filename)
@@ -88,12 +88,41 @@ class DataTensor:
                 / (np.sqrt(2) * self.data_df["RMSCurrentDensity"])
         )
         # Auf das nächste Vielfache von 0,05 runden.
-        self.data_df["RMSPhaseCurrent_D_density"] = (
+        self.data_df[OP_NEURONS[1]] = (
             self.data_df["RMSPhaseCurrent_D"] / conductor_area * 20
         ).round() / 20
-        self.data_df["RMSPhaseCurrent_Q_density"] = (
+        self.data_df[OP_NEURONS[2]] = (
             self.data_df["RMSPhaseCurrent_Q"] / conductor_area * 20
         ).round() / 20
+
+        d_si = self.data_df["Stator_Bore"]
+        d_sa = self.data_df["Stator_Lam_Dia"]
+        radial_width = (d_sa - d_si) / 2
+
+        self.data_df[LAMBDA_LIST[0]] = d_si / d_sa
+        self.data_df[LAMBDA_LIST[1]] = self.data_df["Magnet_Arc_[ED]"] / 180
+        self.data_df[LAMBDA_LIST[2]] = self.data_df["Airgap"] / self.data_df["Magnet_Length"]
+
+        # b_S / tau_s, b_S / d_S, h_PM / ((D_Sa - D_Si) / 2)
+        self.data_df[LAMBDA_LIST[3]] = (
+            self.data_df["Slot_Number"] * self.data_df["Slot_Width"] / (math.pi * d_si)
+        )
+        self.data_df[LAMBDA_LIST[4]] = self.data_df["Slot_Width"] / self.data_df["Slot_Depth"]
+        self.data_df[LAMBDA_LIST[5]] = self.data_df["Magnet_Thickness"] / radial_width
+
+        # d_emb / (radial_width - h_PM)
+        self.data_df[LAMBDA_LIST[6]] = (
+            self.data_df["Magnet_Embed_Depth"]
+            / (radial_width - self.data_df["Magnet_Thickness"])
+        )
+        # (l_S - d_S) / tau_p, with tau_p = pi * (D_Sa + D_Si) / (2 * p)
+        self.data_df[LAMBDA_LIST[7]] = (
+            2 * self.data_df["Pole_Number"]
+            * (self.data_df["Stator_Lam_Length"] - self.data_df["Slot_Depth"])
+            / (math.pi * (d_sa + d_si))
+        )
+        self.data_df[LAMBDA_LIST[8]] = self.data_df["Magnet_Length"] / self.data_df["Rotor_Lam_Length"]
+
 
 
     def _clean_data(self) -> None:
@@ -107,7 +136,7 @@ class DataTensor:
 
         for idx_machine, (geometry_tuple, map_df) in enumerate(_machines):
 
-            operating_points = map_df[list(self.label_axis)]
+            operating_points = map_df[self.label_axis]
 
             # machine multiple times in csv
             if operating_points.duplicated().any():
@@ -131,7 +160,7 @@ class DataTensor:
     def _identify_machines_in_csv(self) -> DataFrameGroupBy:
 
         _machines = self.data_df.groupby(
-            INPUT_NEURON_LIST,
+            MACHINE_DEFINITION,
             sort=False
         )
 
@@ -164,7 +193,7 @@ class DataTensor:
             (
                 self.num_machines,
                 *self.map_shape,
-                len(INPUT_NEURON_LIST)
+                len(MACHINE_DEFINITION),
             ),
             np.nan,
             dtype=np.float32

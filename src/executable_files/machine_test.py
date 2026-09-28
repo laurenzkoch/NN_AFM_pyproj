@@ -2,7 +2,7 @@
 from src.config.config_mcad_parameters import *
 
 from src.modules.process.motor_cad_processes.mcad_processing import test_boundary_conditions
-from src.modules.generators.machine_generator import AFMMachineGenerator
+from src.modules.simulation.generators.machine_generator import AFMMachineGenerator
 
 
 num_base_designs: int = 100
@@ -27,7 +27,7 @@ for i in range(3, i_max + 1):
             design_counter = 0
             drop_counter = 0
 
-            for design in generator.get_generator():
+            for design in generator.get_generator(_type="v1"):
 
                 design_counter += 1
 
