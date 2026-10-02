@@ -2,7 +2,9 @@
 from pathlib import Path
 import subprocess
 import time
+import logging
 
+logger = logging.getLogger(__name__)
 
 class ProcessManager:
 
@@ -16,6 +18,7 @@ class ProcessManager:
 
     def start_process(self) -> None:
         if self.is_running():
+            logger.exception(f"{self.path_exe.name} is already running.")
             raise RuntimeError(
                 f"{self.path_exe.name} is already running."
             )
@@ -25,21 +28,33 @@ class ProcessManager:
             self.wait_until_running(self.executable_name)
 
         except FileNotFoundError as exc:
+            logger.exception(
+                f"{self.executable_name} not found. Please install it and try again."
+            )
             raise FileNotFoundError(
                 f"{self.executable_name} not found. Please install it and try again."
             ) from exc
 
         except TimeoutError as exc:
+            logger.exception(
+                f"{self.executable_name} was found, but did not start within the expected time."
+            )
             raise TimeoutError(
                 f"{self.executable_name} was found, but did not start within the expected time."
             ) from exc
 
         except PermissionError as exc:
+            logger.exception(
+                f"{self.executable_name} was found, but Python has no permission to start it."
+            )
             raise PermissionError(
                 f"{self.executable_name} was found, but Python has no permission to start it."
             ) from exc
 
         except OSError as exc:
+            logger.exception(
+                f"{self.executable_name} could not be started due to an operating system error."
+            )
             raise RuntimeError(
                 f"{self.executable_name} could not be started due to an operating system error."
             ) from exc
@@ -100,5 +115,5 @@ class ProcessManager:
                 return
 
             time.sleep(0.5)
-
+        logger.exception(f"Process '{executable_name}' did not start within {timeout_seconds} seconds.")
         raise TimeoutError(f"Process '{executable_name}' did not start within {timeout_seconds} seconds.")

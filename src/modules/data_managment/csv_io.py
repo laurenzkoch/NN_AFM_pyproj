@@ -1,6 +1,8 @@
 import logging
 from pathlib import Path
 import csv
+from typing import Iterable
+
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -24,7 +26,7 @@ def import_data_from_csv(path_file: Path) -> pd.DataFrame:
 
 def write_row_in_csv(
         path_results: Path,
-        value_row: list[float]
+        value_row: Iterable[float]
 ) -> None:
 
     with open(path_results, mode="a", newline="", encoding="utf-8") as file:

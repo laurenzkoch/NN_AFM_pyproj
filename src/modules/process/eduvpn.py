@@ -1,7 +1,8 @@
-
+import logging
 from src.modules.process.process_management import ProcessManager
 from src.config.config_paths import *
 
+logger = logging.getLogger(__name__)
 
 class EDUVPNProcessor(ProcessManager):
 
@@ -11,14 +12,14 @@ class EDUVPNProcessor(ProcessManager):
         )
 
     def start(self) -> "EDUVPNProcessor":
-        print("-----------Starting eduVPN----------")
+        logger.info("-----------Starting eduVPN----------")
         if self.is_running():
             self.stop_process()
         self.start_process()
         return self
 
     def stop(self) -> None:
-        print("-----------Closing eduVPN----------")
+        logger.info("-----------Closing eduVPN----------")
         self.stop_process()
 
     def __enter__(self) -> "EDUVPNProcessor":

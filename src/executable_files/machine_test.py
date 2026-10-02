@@ -10,11 +10,11 @@ num_lam_designs: int = 100
 num_operation_points_per_dim: int = 5
 num_datapoints = num_base_designs * num_lam_designs**3 * num_operation_points_per_dim**3
 
-i_max = 5
+i_max = 1
 j_max = 5
 _sum = 0
 
-for i in range(3, i_max + 1):
+for i in range(1, i_max + 1):
     for j in range(3, j_max + 1):
         _sum += i * j**3 * 5**3
         with AFMMachineGenerator(
@@ -27,7 +27,7 @@ for i in range(3, i_max + 1):
             design_counter = 0
             drop_counter = 0
 
-            for design in generator.get_generator(_type="v1"):
+            for design in generator.get_generator(_type="v2"):
 
                 design_counter += 1
 

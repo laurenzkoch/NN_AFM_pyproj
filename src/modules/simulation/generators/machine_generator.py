@@ -8,7 +8,7 @@ import math
 from src.modules.simulation.generators.map_generator import map_generator
 from src.config.config_mcad_parameters import *
 
-
+DATAPOINT_PARAMETERS: list[str] = []
 
 class AFMMachineGenerator:
 
@@ -41,8 +41,18 @@ class AFMMachineGenerator:
                 raise ValueError(f"Unknown generator type: {_type}")
 
 
+    @staticmethod
+    def _find_pole_slot_pairs() -> list[tuple[int, int]]:
+        pairs = []
+        for slot in range(SLOT_NUMBER[0], SLOT_NUMBER[1] + 1, 3):
+            for pole in range(POLE_NUMBER[0], POLE_NUMBER[1] + 1, 2):
+                gcd = math.gcd(slot, pole)
+                if slot % (3 * gcd) == 0 and slot > pole and slot / gcd <= 6:
+                    pairs.append((slot, pole))
+        return pairs
 
-    def _find_pole_slot_pairs(self, seed: int = 42) -> np.ndarray:
+
+    def _select_pole_slot_pairs(self, seed: int = 41) -> np.ndarray:
         """Select well-spread [slot, pole] pairs from slots 3..30 and poles 2..20.
 
         Match normalized LHS targets to distinct valid pairs at minimum total
@@ -53,12 +63,7 @@ class AFMMachineGenerator:
         if num_pairs < 1:
             raise ValueError("num_of_sub_designs must be >= 1")
 
-        pairs = []
-        for slot in range(SLOT_NUMBER[0], SLOT_NUMBER[1]+1, 3):
-            for pole in range(POLE_NUMBER[0], POLE_NUMBER[1]+1, 2):
-                gcd = math.gcd(slot, pole)
-                if slot % (3*gcd) == 0 and slot > pole and slot / gcd <= 6:
-                    pairs.append((slot, pole))
+        pairs = self._find_pole_slot_pairs()
 
         if num_pairs > len(pairs):
             raise ValueError(
@@ -211,10 +216,10 @@ class AFMMachineGenerator:
             d=1,
             lower_bounds=np.array([AIRGAP[0]]),
             upper_bounds=np.array([AIRGAP[1]]),
-            seed=10
+            seed=17
         )
 
-        slot_pole_samples: np.ndarray = self._find_pole_slot_pairs()
+        slot_pole_samples: np.ndarray = self._select_pole_slot_pairs()
 
         op_samples: np.ndarray = map_generator(
             i_min_max=SHAFT_SPEED,

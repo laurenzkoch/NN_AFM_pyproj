@@ -10,17 +10,23 @@ from src.config.config_paths import *
 
 logger = logging.getLogger(__name__)
 
-def _print_design(parameter_list: list[str], value_list: list[float | int]) -> None:
-    for _var, _value in zip(parameter_list, value_list):
-        print(f"\t\t{_var}: {_value}")
-    print("__________________________________________________")
+def _design_to_string(
+    parameter_list: list[str],
+    value_list: list[float | int],
+) -> str:
+
+    return "\n".join(
+        f"\t\t{var}: {value}"
+        for var, value in zip(parameter_list, value_list)
+    )
 
 def test_boundary_conditions(parameter_list: list[str], values: list[float]) -> bool:
 
     keys = parameter_list
 
     if len(keys) != len(values):
-        raise ValueError("Anzahl der keys stimmt nicht mit Anzahl der values überein")
+        logger.exception("The number of keys does not match the number of values.")
+        raise ValueError("The number of keys does not match the number of values.")
 
     parameter_dict = {
         k: float(v)
@@ -140,7 +146,8 @@ class MCADProcessor:
         self.mcad_process: pymotorcad.MotorCAD = pymotorcad.MotorCAD()
 
     def start(self) -> None:
-        self.mcad_process.set_visible(True)
+        self.mcad_process.set_variable("MessageDisplayState", 2)
+        self.mcad_process.set_visible(False)
 
     def close(self) -> None:
         try:
@@ -162,18 +169,17 @@ class MCADProcessor:
         file_path = Path(file_path)
 
         if not file_path.exists():
-            raise FileNotFoundError(
-                f"File not found: {file_path}"
-            )
+            logger.exception(f"File not found: {file_path}")
+            raise FileNotFoundError(f"File not found: {file_path}")
 
         self.mcad_process.load_from_file(str(file_path))
-
 
 
     def set_value_in_mcad(self, variable_name: str, value: float) -> None:
         try:
             self.mcad_process.set_variable(variable_name, value)
         except Exception as exc:
+            logger.exception(f"Failed to set variable {variable_name} to value {value}.")
             raise ValueError(f"Failed to set variable {variable_name} to value {value}.") from exc
 
 
@@ -181,6 +187,7 @@ class MCADProcessor:
         try:
             return float(self.mcad_process.get_variable(variable_name))
         except Exception as exc:
+            logger.exception(f"Failed to get variable {variable_name} from MotorCAD.")
             raise ValueError(f"Failed to get variable {variable_name} from MotorCAD.") from exc
 
 
@@ -208,19 +215,24 @@ class MCADProcessor:
         if test_boundary_conditions(all_parameters, all_values):
 
             if self.do_calculation():
-                value_row = get_values(SIM_INPUT_PARAMETERS)
+                value_row = get_values(CSV_PARAMETERS)
 
                 #print("___________Calculation ran sucessfully___________")
                 #_print_design(all_parameters, all_values)
                 #_print_design(OUTPUT_NEURON_LIST, output_values)
                 return value_row, True
 
-            else:
-                logger.error("Calculation failed")
-                _print_design(all_parameters, all_values)
-                return None, False
 
+            else:
+                logger.error(
+                    "Calculation failed\n%s",
+                    _design_to_string(all_parameters, all_values),
+
+                )
+                return None, False
         else:
-            logger.error("Failed boundary check:")
-            _print_design(all_parameters, all_values)
+            logger.error(
+                "Failed boundary check\n%s",
+                _design_to_string(all_parameters, all_values),
+            )
             return None, False

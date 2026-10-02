@@ -1,13 +1,15 @@
 import logging
-
+from queue import Queue
 import numpy as np
-from typing import Iterable
+from typing import Iterable, Generator
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from itertools import batched
+import pandas as pd
 
-from src.config.config_mcad_parameters import *
 from src.modules.data_managment.csv_io import import_data_from_csv, write_row_in_csv
 from src.modules.process.motor_cad_processes import mcad_instance_handling
 from src.config.config_paths import *
+from src.config.config_mcad_parameters import *
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,12 @@ def _func(
 
             mcad.set_value_in_mcad(name, value)
 
+        logger.info(
+            "Winding: offset=%s coils=%s",
+            mcad.get_value_from_mcad("MagWindingOffset"),
+            mcad.get_value_from_mcad("NumberOfCoils"),
+        )
+
         return mcad.execute_mcad_simulation()
 
     except Exception:
@@ -42,80 +50,166 @@ def _func(
         raise
 
 
-def run_simulation_pool(
-        batch_machine_generator_instance: Iterable[dict[str, float]],
-        progress_queue,
-        csv_path: Path,
-        num_workers: int,
-) -> None:
+class MCADSimulation:
 
-    with ProcessPoolExecutor(
-        max_workers=num_workers,
-        initializer=mcad_instance_handling.init_mcad_instance
-    ) as executor:
+    def __init__(
+            self,
+            point_generator: Generator[dict[str, float], None, None],
+            batch_size: int,
+            progress_queue: Queue,
+            csv_path: Path,
+            num_workers: int,
+            log_queue: Queue,
+    ) -> None:
+        self.point_generator = point_generator
+        self.batch_size = batch_size
+        self.progress_queue = progress_queue
+        self.csv_path = csv_path
+        self.num_workers = num_workers
+        self.dataframes: dict[str, pd.DataFrame] = self._get_csv_files()
+        self.log_queue = log_queue
 
-        data_df = import_data_from_csv(csv_path)
 
-        batch = list(batch_machine_generator_instance)
+    @staticmethod
+    def _get_csv_files() -> dict[str, pd.DataFrame]:
 
-        if not batch:
-            return
+        dataframes_dict = {}
+        for csv_file in PATH_DATA_MCAD_RESULTS.glob("*.csv"):
 
-        parameter_names = tuple(batch[0].keys())
+            try:
+                dataframe = import_data_from_csv(csv_file)
+            except (
+                    pd.errors.EmptyDataError,
+                    pd.errors.ParserError,
+                    UnicodeDecodeError,
+            ) as exc:
+                logger.warning(
+                    "Skipping unreadable CSV %s: %s",
+                    csv_file.name,
+                    exc,
+                )
+                continue
 
+            missing_columns = [
+                column
+                for column in CSV_PARAMETERS
+                if column not in dataframe.columns
+            ]
+
+            if missing_columns:
+                logger.warning(
+                    "Skipping incompatible CSV %s. Missing columns: %s",
+                    csv_file.name,
+                    missing_columns,
+                )
+                continue
+
+            dataframes_dict[csv_file.stem] = dataframe
+
+        return dataframes_dict
+
+    @staticmethod
+    def _get_known_points(dataframe: pd.DataFrame, parameter_list: list[str]) -> set[tuple[int | float]]:
         known_points = {
             tuple(row)
-            for row in data_df[list(parameter_names)].itertuples(
-                index=False,
+            for row in dataframe[parameter_list].itertuples(
+                index=True,
                 name=None,
             )
         }
+        return known_points
 
-        futures = []
 
-        for parameter_dict in batch_machine_generator_instance:
+    def _get_all_known_points(self, parameter_list: list[str]) -> dict[str, set[tuple[int | float]]]:
+        known_points: dict[str, set[tuple[int | float]]] = {}
+        for key_csv_path, value_dataframe in self.dataframes.items():
+            known_points[key_csv_path] = self._get_known_points(value_dataframe, parameter_list)
+        return known_points
 
-            point = tuple(
-                parameter_dict[name]
-                for name in parameter_names
-            )
 
-            if any(
-                    all(
-                        abs(a - b) <= 1e-4
-                        for a, b in zip(point, known_point)
-                    )
-                    for known_point in known_points
-            ):
-                progress_queue.put(("point existing", None))
-                continue
-
-            known_points.add(point)
-
-            futures.append(
-                executor.submit(
-                    _func,
-                    parameter_dict=parameter_dict,
-                )
-            )
-
+    def run_simulation(self) -> None:
         try:
-            for future in as_completed(futures):
-                values_row, simulation_succeeded = future.result()
-                progress_queue.put(("progress", simulation_succeeded))
-
-                if simulation_succeeded and values_row is not None:
-                    write_row_in_csv(csv_path, values_row)
+            for batch in batched(
+                    self.point_generator,
+                    self.batch_size
+            ):
+                self._run_simulation_pool(batch)
+            self.progress_queue.put(("DONE", None))
         except Exception as exc:
-
-            logger.error(f"Simulation pool failed: {exc!r}")
-
-            for future in futures:
-                future.cancel()
-
-            executor.shutdown(
-                wait=True,
-                cancel_futures=True,
-            )
-
+            self.progress_queue.put(("ERROR", exc))
+            logger.exception(f"An error occurred during simulation: {exc}")
             raise
+
+
+    def _run_simulation_pool(
+            self,
+            batch_machine_generator_instance: Iterable[dict[str, float]],
+    ) -> None:
+
+        with ProcessPoolExecutor(
+            max_workers=self.num_workers,
+            initializer=mcad_instance_handling.init_mcad_instance,
+            initargs=(self.log_queue,),
+        ) as executor:
+
+            futures = []
+            for parameter_dict in batch_machine_generator_instance:
+
+                parameter_list = list(parameter_dict.keys())
+                known_points = self._get_all_known_points(parameter_list)
+                point = tuple(parameter_dict.values())
+
+                point_found = False
+
+                for key_csv_path, known_points_set in known_points.items():
+                    for known_point in known_points_set:
+                        if all(
+                                abs(a - b) <= 1e-4
+                                for a, b in zip(point, known_point[1:])
+                            ):
+                            point_found = True
+                            if key_csv_path == self.csv_path.stem:
+                                self.progress_queue.put(("point existing", None))
+                            else:
+                                values_row: list[float] = (
+                                    self.dataframes[key_csv_path]
+                                    .loc[known_point[0], CSV_PARAMETERS]
+                                    .tolist()
+                                )
+                                write_row_in_csv(self.csv_path, values_row)
+                                self.progress_queue.put(("point copied", None))
+                            break
+
+                    if point_found:
+                        break
+
+                if point_found:
+                    continue
+
+                futures.append(
+                    executor.submit(
+                        _func,
+                        parameter_dict=parameter_dict,
+                    )
+                )
+
+            try:
+                for future in as_completed(futures):
+                    values_row, simulation_succeeded = future.result()
+                    self.progress_queue.put(("progress", simulation_succeeded))
+
+                    if simulation_succeeded and values_row is not None:
+                        write_row_in_csv(self.csv_path, values_row)
+            except Exception as exc:
+
+                logger.error(f"Simulation pool failed: {exc!r}")
+
+                for future in futures:
+                    future.cancel()
+
+                executor.shutdown(
+                    wait=True,
+                    cancel_futures=True,
+                )
+
+                raise

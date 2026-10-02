@@ -5,10 +5,10 @@ from src.config.config_mcad_parameters import *
 
 
 def map_generator(
-        i_min_max: tuple[float | int, float| int],
-        j_min_max: tuple[float | int, float| int],
-        k_min_max: tuple[float | int, float| int],
-        num_operation_points_per_dim: int
+        i_min_max: tuple[float | int, float| int] = SHAFT_SPEED,
+        j_min_max: tuple[float | int, float| int] = Q_CURRENT_DENSITY,
+        k_min_max: tuple[float | int, float| int] = D_CURRENT_DENSITY,
+        num_operation_points_per_dim: int = 5,
 ) -> np.ndarray:
 
     values = []
@@ -21,10 +21,5 @@ def map_generator(
 
 
 if __name__ == "__main__":
-    op_samples = map_generator(
-        i_min_max=SHAFT_SPEED,
-        j_min_max=Q_CURRENT_DENSITY,
-        k_min_max=D_CURRENT_DENSITY,
-        num_operation_points_per_dim=5
-    )
+    op_samples = map_generator()
     print(op_samples)
