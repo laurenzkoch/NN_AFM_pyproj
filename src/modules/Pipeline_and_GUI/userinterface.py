@@ -1,6 +1,5 @@
 import tkinter as tk
 from tkinter import ttk
-from typing import Callable
 
 
 class MyUserInterface:
@@ -11,23 +10,15 @@ class MyUserInterface:
             process_name: str = "Progress Monitoring",
             title: str = "Progress Monitoring",
             geometry: str = "450x350",
-            button_function: Callable[[], None] = lambda: None,
-            autostart: bool = False
     ) -> None:
-
         self.root = tk.Tk()
 
-        self.button_function = button_function
         self.root.title(process_name)
         self.root.geometry(geometry)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        self.running = False
         self.value = 0
-        self.simulated_points = 0
-        self.dropped_points = 0
         self.max_value = max_value
-
 
         # Überschrift
         title_label = ttk.Label(
@@ -55,32 +46,27 @@ class MyUserInterface:
         )
         self.progressbar.pack(pady=10)
 
-        self.start_button_sim = ttk.Button(
-            self.root,
-            text="Start",
-            command=lambda: self.button_function()
-        )
-        self.start_button_sim.pack(pady=15)
-
         self.info_label = ttk.Label(
             self.root,
             text="Ready"
         )
         self.info_label.pack(pady=10)
 
-        if autostart:
-            self.root.after_idle(self.button_function)
-
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.root.destroy()
 
-    def update_progress(self, value: int) -> None:
-
+    def _update_progress(self, _value: int) -> None:
         self.value_label.config(
-            text=f"Progress: {value} from {self.max_value}"
+            text=f"Progress: {_value} from {self.max_value}"
         )
-        self.progressbar["value"] = value
+        self.progressbar["value"] = _value
 
+    def update_ui(self, text: str, _value: int) -> None:
+        self._update_progress(_value)
+        self.info_label.config(text=text)
+
+    def run_ui(self) -> None:
+        self.root.mainloop()
 
     def on_close(self) -> None:
         self.root.destroy()

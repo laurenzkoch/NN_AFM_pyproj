@@ -1,18 +1,19 @@
+from pathlib import Path
+from typing import Any
 
+import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-import pandas as pd
-from typing import Any
 
-from config.config_paths import *
+from src.config.config_paths import PATH_DATA_PLOTS
+
 
 def create_fig_matplotlib(
         xlabel: str,
         ylabel: str,
         title: str,
 ) -> tuple[Figure, Axes]:
-
     fig, ax = plt.subplots()
 
     ax.set_xlabel(xlabel)
@@ -23,7 +24,7 @@ def create_fig_matplotlib(
 
 
 def add_scatter_to_fig(
-        ax :Axes,
+        ax: Axes,
         x_column: pd.Series | Any,
         y_column: pd.Series | Any,
         z_column: pd.Series | None = None,
@@ -31,7 +32,6 @@ def add_scatter_to_fig(
         marker: str = "x",
         label: str = ""
 ) -> None:
-
     if z_column is not None:
         ax.scatter(
             x=x_column,
@@ -58,7 +58,6 @@ def add_plot_to_fig(
         colors: str | tuple[float, float, float, float] = "r",
         label: str = ""
 ) -> None:
-
     ax.plot(
         x_column,
         y_column,
@@ -73,14 +72,12 @@ def add_plot_to_fig(
     )
 
 
-
 def add_text_to_fig(
         ax: Axes,
         text: str,
         x: float = 1.1,
         y: float = 0.8,
 ) -> None:
-
     ax.text(
         x=x,
         y=y,
@@ -95,7 +92,6 @@ def add_text_to_fig(
             alpha=0.8
         )
     )
-
 
 
 def add_legend_to_fig(ax: Axes, loc: str = "upper left") -> None:

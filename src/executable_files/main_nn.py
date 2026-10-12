@@ -1,22 +1,21 @@
 import pickle
+
 import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset
 
-from src.modules.neuronal_networks.manipulating_data import DataTensor
-from src.modules.neuronal_networks.mlp_with_torch import MLP, TrainedMLP
-from src.modules.neuronal_networks.cnn_autoencoder import Conv3dAutoencoder, TrainedCNNAutoencoder
-from src.modules.neuronal_networks.nn_training_torch import NNTrainer
-
+from modules.neuronal_networks.NN_types.cnn_autoencoder import Conv3dAutoencoder, TrainedCNNAutoencoder
+from modules.neuronal_networks.NN_types.mlp_with_torch import MLP, TrainedMLP
 from src.config.config_mcad_parameters import *
 from src.config.config_paths import *
-
+from src.modules.neuronal_networks.manipulating_data import DataLoader
+from src.modules.neuronal_networks.nn_training_torch import NNTrainer
 
 ########################################################################################################################
 # load data
 
 file = "Results_EMagnetic_simulation_3_3_5_GenType-v1_18.09.2026_13-52-26_CEST.csv"
-data = DataTensor(filename=file)
+data = DataLoader(filename=file)
 
 with open(PATH_DATA_TRAINED_NN / "data.pkl", "wb") as file:
     pickle.dump(data, file)
@@ -37,12 +36,8 @@ dataset_validation_data = TensorDataset(
 ########################################################################################################################
 # MLP ONLY
 
-mlp = MLP(
-    num_input_neurons=len(INPUT_NEURON),
-    num_output_neurons=len(OUTPUT_NEURON_LIST),
-    hidden_layer_neurons=(64, 32, 16),
-    activation=nn.ReLU
-)
+mlp = MLP(num_input_neurons=len(INPUT_NEURON), output_dims=len(OUTPUT_NEURON_LIST), hidden_layer_neurons=(64, 32, 16),
+          activation=nn.ReLU)
 mlp_trainer = NNTrainer(
     neuronal_network=mlp,
     train_data=dataset_train_data,
@@ -61,15 +56,13 @@ torch.save(
     PATH_DATA_TRAINED_NN / "trained_mlp.pt"
 )
 
-
-
 ########################################################################################################################
 ########################################################################################################################
 # AUTOENCODER
 
 autoencoder = Conv3dAutoencoder(
     latent_dim=15,
-    features=(len(OUTPUT_NEURON_LIST), 2*len(OUTPUT_NEURON_LIST), 3*len(OUTPUT_NEURON_LIST)),
+    features=(len(OUTPUT_NEURON_LIST), 2 * len(OUTPUT_NEURON_LIST), 3 * len(OUTPUT_NEURON_LIST)),
     map_shape=(5, 5, 5),
     kernel_size=3,
     activation=nn.ReLU,
@@ -85,14 +78,13 @@ torch.save(
     TrainedCNNAutoencoder(
         model_state_dict=trained_autoencoder.state_dict(),
         latent_dim=15,
-        features=(len(OUTPUT_NEURON_LIST), 2*len(OUTPUT_NEURON_LIST), 3*len(OUTPUT_NEURON_LIST)),
+        features=(len(OUTPUT_NEURON_LIST), 2 * len(OUTPUT_NEURON_LIST), 3 * len(OUTPUT_NEURON_LIST)),
         map_shape=(5, 5, 5),
         kernel_size=3,
         activation=nn.ReLU,
     ),
     PATH_DATA_TRAINED_NN / "trained_autoencoder.pt"
 )
-
 
 ########################################################################################################################
 ########################################################################################################################

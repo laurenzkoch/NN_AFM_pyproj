@@ -1,16 +1,16 @@
-
-from pathlib import Path
+import logging
 import subprocess
 import time
-import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
 
 class ProcessManager:
 
     def __init__(
-        self,
-        path_exe: Path,
+            self,
+            path_exe: Path,
     ) -> None:
         self.path_exe = path_exe
         self.process: subprocess.Popen | None = None
@@ -59,7 +59,6 @@ class ProcessManager:
                 f"{self.executable_name} could not be started due to an operating system error."
             ) from exc
 
-
     def stop_process(self) -> None:
 
         if self.process is None:
@@ -104,7 +103,6 @@ class ProcessManager:
             return True
         else:
             return False
-
 
     def wait_until_running(self, executable_name, timeout_seconds: float = 30.0):
 

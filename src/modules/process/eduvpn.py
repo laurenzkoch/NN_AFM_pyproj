@@ -1,8 +1,10 @@
 import logging
+
+from src.config.config_paths import PATH_eduVPN_EXE
 from src.modules.process.process_management import ProcessManager
-from src.config.config_paths import *
 
 logger = logging.getLogger(__name__)
+
 
 class EDUVPNProcessor(ProcessManager):
 
@@ -27,9 +29,9 @@ class EDUVPNProcessor(ProcessManager):
         return self
 
     def __exit__(
-        self,
-        exc_type,
-        exc_val,
-        exc_tb,
+            self,
+            exc_type,
+            exc_val,
+            exc_tb,
     ) -> None:
         self.stop()

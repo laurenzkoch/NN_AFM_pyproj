@@ -1,11 +1,12 @@
+import csv
 import logging
 from pathlib import Path
-import csv
 from typing import Iterable
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
 
 def create_csv_file(path: Path, columns_list: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -28,7 +29,6 @@ def write_row_in_csv(
         path_results: Path,
         value_row: Iterable[float]
 ) -> None:
-
     with open(path_results, mode="a", newline="", encoding="utf-8") as file:
         writer = csv.writer(file, delimiter=";", quotechar='"')
         formatted_value_row = [
@@ -42,7 +42,6 @@ def write_from_csv_in_csv(
         input_folder: Path,
         output_file: Path,
 ) -> None:
-
     csv_files = sorted(input_folder.glob(pattern="*.csv"))
     if not csv_files:
         raise FileNotFoundError(f"No CSV files found in {input_folder}")

@@ -1,13 +1,14 @@
-from dataclasses import dataclass, field
 import time
-import pandas as pd
+from dataclasses import dataclass, field
 from typing import Any, cast
+
+import pandas as pd
+from sklearn.compose import TransformedTargetRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
 from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import Pipeline
-from sklearn.compose import TransformedTargetRegressor
+from sklearn.preprocessing import StandardScaler
 
 
 @dataclass
@@ -40,13 +41,13 @@ class MLPModel:
     mse_test: float | None = None
     computing_time: float = 0.0
 
+
 class MLPModelTrainer:
 
     @staticmethod
     def create_model(
             layer_neurons: tuple[int, ...] = (50, 50, 50)
     ) -> TransformedTargetRegressor:
-
         mlp_regressor = MLPRegressor(
             hidden_layer_sizes=layer_neurons,
             activation="relu",
@@ -80,7 +81,6 @@ class MLPModelTrainer:
             test_split: float,
             model: Any
     ) -> MLPModel:
-
         start = time.perf_counter()
 
         x_train, x_test, y_train, y_test = train_test_split(

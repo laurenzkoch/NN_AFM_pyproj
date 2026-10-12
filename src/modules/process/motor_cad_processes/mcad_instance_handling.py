@@ -1,18 +1,17 @@
-
-import os
-import logging
 import atexit
-from pathlib import Path
+import logging
+import os
 from multiprocessing import Queue
+from pathlib import Path
 
-from src.modules.process.motor_cad_processes import mcad_processing
+from src.config.config_logging import setup_worker_logging
 from src.config.config_paths import PATH_MCAD_BASEFILE
 from src.modules.data_managment.temp_files import create_temp_file_copy
-from src.config.config_logging import setup_worker_logging
+from src.modules.process.motor_cad_processes.mcad_processing import MCADProcessor
 
 logger = logging.getLogger(__name__)
 
-_mcad_instance: mcad_processing.MCADProcessor | None = None
+_mcad_instance: MCADProcessor | None = None
 
 
 def init_mcad_instance(log_queue: Queue) -> None:
@@ -24,13 +23,13 @@ def init_mcad_instance(log_queue: Queue) -> None:
     atexit.register(shutdown_mcad_instance)
 
     if _mcad_instance is None:
-        _mcad_instance = mcad_processing.MCADProcessor()
+        _mcad_instance = MCADProcessor()
     if _mcad_instance is not None:
         _mcad_instance.start()
         open_mcad_file(_mcad_instance)
 
 
-def get_mcad_instance() -> mcad_processing.MCADProcessor:
+def get_mcad_instance() -> MCADProcessor:
     global _mcad_instance
     if _mcad_instance is None:
         logger.exception("Worker MCAD instance not initialized")
@@ -48,8 +47,7 @@ def shutdown_mcad_instance() -> None:
         _mcad_instance = None
 
 
-def open_mcad_file(mcad_instance: mcad_processing.MCADProcessor) -> None:
-
+def open_mcad_file(mcad_instance: MCADProcessor) -> None:
     file_path = create_temp_file_copy(
         Path(PATH_MCAD_BASEFILE)
     )

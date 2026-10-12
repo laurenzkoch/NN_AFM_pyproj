@@ -22,3 +22,5 @@ tzdata
 requests==2.34.2
 idna
 charset-normalizer
+
+optuna

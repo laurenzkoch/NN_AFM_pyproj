@@ -1,11 +1,12 @@
-
-import pandas as pd
-from matplotlib.axes import Axes
 from collections.abc import Sequence
 from typing import Any
+
 import numpy as np
+import pandas as pd
 import seaborn as sns
+from matplotlib.axes import Axes
 from matplotlib.colors import LogNorm
+
 
 def add_heatmap_to_fig(
         ax: Axes,
@@ -18,7 +19,6 @@ def add_heatmap_to_fig(
         title: str,
         log_scale: bool = False,
 ) -> Axes:
-
     data = pd.DataFrame({
         "x": x,
         "y": y,

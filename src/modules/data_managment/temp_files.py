@@ -1,11 +1,10 @@
-
 import shutil
 import tempfile
 
 from src.config.config_paths import *
 
-def create_temp_file_copy(source_path: Path) -> Path:
 
+def create_temp_file_copy(source_path: Path) -> Path:
     if not source_path.exists():
         raise FileNotFoundError(f"File not found: {source_path}")
 
@@ -24,8 +23,8 @@ def create_temp_file_copy(source_path: Path) -> Path:
 
     return temp_path
 
-def create_temp_csv_file(source_path: Path) -> Path:
 
+def create_temp_csv_file(source_path: Path) -> Path:
     path_temp_csv_folder = Path(source_path / "temp_csv")
     path_temp_csv_folder.mkdir(exist_ok=True)
 

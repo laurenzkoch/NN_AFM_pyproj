@@ -1,6 +1,6 @@
-
 import shutil
 from pathlib import Path
+
 
 def delete_folder(folder: Path) -> None:
     if not folder.exists():

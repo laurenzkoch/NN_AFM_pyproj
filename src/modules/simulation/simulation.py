@@ -1,23 +1,25 @@
 import logging
-from queue import Queue
-import numpy as np
-from typing import Iterable, Generator
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from itertools import batched
+from multiprocessing import Queue
+from pathlib import Path
+from typing import Iterable, Generator
+
+import numpy as np
 import pandas as pd
 
+from src.config.config_mcad_parameters import CSV_PARAMETERS
+from src.config.config_paths import PATH_DATA_MCAD_RESULTS
+from src.modules.Pipeline_and_GUI.events import PipelineEvent, EventType
 from src.modules.data_managment.csv_io import import_data_from_csv, write_row_in_csv
 from src.modules.process.motor_cad_processes import mcad_instance_handling
-from src.config.config_paths import *
-from src.config.config_mcad_parameters import *
 
 logger = logging.getLogger(__name__)
 
 
-def _func(
-    parameter_dict: dict[str, float],
+def _execute_simulation(
+        parameter_dict: dict[str, float],
 ) -> tuple[list[float] | None, bool]:
-
     try:
         mcad = mcad_instance_handling.get_mcad_instance()
 
@@ -57,18 +59,20 @@ class MCADSimulation:
             point_generator: Generator[dict[str, float], None, None],
             batch_size: int,
             progress_queue: Queue,
+            log_queue: Queue,
             csv_path: Path,
             num_workers: int,
-            log_queue: Queue,
     ) -> None:
+
         self.point_generator = point_generator
         self.batch_size = batch_size
         self.progress_queue = progress_queue
+        self.log_queue = log_queue
         self.csv_path = csv_path
         self.num_workers = num_workers
         self.dataframes: dict[str, pd.DataFrame] = self._get_csv_files()
-        self.log_queue = log_queue
 
+        self._known_points_cache = {}
 
     @staticmethod
     def _get_csv_files() -> dict[str, pd.DataFrame]:
@@ -108,6 +112,17 @@ class MCADSimulation:
 
         return dataframes_dict
 
+
+    def _get_cached_known_points(self, parameter_list):
+        schema = tuple(parameter_list)
+
+        if schema not in self._known_points_cache:
+            self._known_points_cache[schema] = (
+                self._get_all_known_points(parameter_list)
+            )
+
+        return self._known_points_cache[schema]
+
     @staticmethod
     def _get_known_points(dataframe: pd.DataFrame, parameter_list: list[str]) -> set[tuple[int | float]]:
         known_points = {
@@ -119,27 +134,22 @@ class MCADSimulation:
         }
         return known_points
 
-
     def _get_all_known_points(self, parameter_list: list[str]) -> dict[str, set[tuple[int | float]]]:
         known_points: dict[str, set[tuple[int | float]]] = {}
         for key_csv_path, value_dataframe in self.dataframes.items():
             known_points[key_csv_path] = self._get_known_points(value_dataframe, parameter_list)
         return known_points
 
-
-    def run_simulation(self) -> None:
+    def run(self) -> None:
         try:
             for batch in batched(
                     self.point_generator,
                     self.batch_size
             ):
                 self._run_simulation_pool(batch)
-            self.progress_queue.put(("DONE", None))
         except Exception as exc:
-            self.progress_queue.put(("ERROR", exc))
             logger.exception(f"An error occurred during simulation: {exc}")
             raise
-
 
     def _run_simulation_pool(
             self,
@@ -147,16 +157,16 @@ class MCADSimulation:
     ) -> None:
 
         with ProcessPoolExecutor(
-            max_workers=self.num_workers,
-            initializer=mcad_instance_handling.init_mcad_instance,
-            initargs=(self.log_queue,),
+                max_workers=self.num_workers,
+                initializer=mcad_instance_handling.init_mcad_instance,
+                initargs=(self.log_queue,),
         ) as executor:
 
             futures = []
             for parameter_dict in batch_machine_generator_instance:
 
                 parameter_list = list(parameter_dict.keys())
-                known_points = self._get_all_known_points(parameter_list)
+                known_points = self._get_cached_known_points(parameter_list)
                 point = tuple(parameter_dict.values())
 
                 point_found = False
@@ -166,10 +176,16 @@ class MCADSimulation:
                         if all(
                                 abs(a - b) <= 1e-4
                                 for a, b in zip(point, known_point[1:])
-                            ):
+                        ):
                             point_found = True
                             if key_csv_path == self.csv_path.stem:
-                                self.progress_queue.put(("point existing", None))
+                                self.progress_queue.put(
+                                    PipelineEvent(
+                                        event_type=EventType.PROGRESS,
+                                        increment=1,
+                                        outcome="existing",
+                                    )
+                                )
                             else:
                                 values_row: list[float] = (
                                     self.dataframes[key_csv_path]
@@ -177,7 +193,13 @@ class MCADSimulation:
                                     .tolist()
                                 )
                                 write_row_in_csv(self.csv_path, values_row)
-                                self.progress_queue.put(("point copied", None))
+                                self.progress_queue.put(
+                                    PipelineEvent(
+                                        event_type=EventType.PROGRESS,
+                                        increment=1,
+                                        outcome="copied",
+                                    )
+                                )
                             break
 
                     if point_found:
@@ -188,7 +210,7 @@ class MCADSimulation:
 
                 futures.append(
                     executor.submit(
-                        _func,
+                        _execute_simulation,
                         parameter_dict=parameter_dict,
                     )
                 )
@@ -196,7 +218,17 @@ class MCADSimulation:
             try:
                 for future in as_completed(futures):
                     values_row, simulation_succeeded = future.result()
-                    self.progress_queue.put(("progress", simulation_succeeded))
+                    self.progress_queue.put(
+                        PipelineEvent(
+                            event_type=EventType.PROGRESS,
+                            increment=1,
+                            outcome=(
+                                "simulated"
+                                if simulation_succeeded
+                                else "dropped"
+                            ),
+                        )
+                    )
 
                     if simulation_succeeded and values_row is not None:
                         write_row_in_csv(self.csv_path, values_row)

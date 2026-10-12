@@ -1,14 +1,13 @@
 import logging
 import logging.handlers
 from datetime import datetime
-from zoneinfo import ZoneInfo
 from multiprocessing import Queue
+from zoneinfo import ZoneInfo
 
 from src.config.config_paths import PATH_LOGS
 
 
 def setup_main_logging(log_queue: Queue):
-
     PATH_LOGS.mkdir(
         parents=True,
         exist_ok=True,
@@ -65,7 +64,6 @@ def setup_main_logging(log_queue: Queue):
 
 
 def setup_worker_logging(log_queue: Queue):
-
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
 

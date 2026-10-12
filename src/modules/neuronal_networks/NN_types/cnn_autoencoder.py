@@ -1,15 +1,17 @@
 import math
-from dataclasses import dataclass
 
 import torch.nn as nn
+
+from src.config.config_mcad_parameters import MAP_SIZE
+
 
 class Conv3dAutoencoder(nn.Module):
 
     def __init__(
             self,
-            latent_dim: int = 15,
-            features: tuple[int, ...] = (7, 15, 30),
-            map_shape: tuple[int,...] = (5, 5, 5),
+            latent_dim: int,
+            features: tuple[int, ...],
+            map_shape: tuple[int, ...] = MAP_SIZE,
             kernel_size: int = 3,
             activation: type[nn.Module] = nn.ReLU
     ):
@@ -21,6 +23,8 @@ class Conv3dAutoencoder(nn.Module):
         )
         if not is_increasing:
             raise ValueError("features must be increasing")
+
+        self.model_state_dict: dict
 
         self.map_shape = map_shape
         self.features = features
@@ -71,42 +75,41 @@ class Conv3dAutoencoder(nn.Module):
             features[-1] * math.prod(map_shape)
         )
 
-
     def encode(self, x):
 
         x = x.permute(0, 4, 1, 2, 3)
 
         x = self.encoder_conv(x)
-        #before: (batch, *map_shape, num_output_neurons)
-        #after: (batch, *map_shape, features[-1],)
+        # before: (batch, *map_shape, num_output_neurons)
+        # after: (batch, *map_shape, features[-1],)
 
         x = x.flatten(start_dim=1)
-        #before: (batch, *map_shape, features[-1])
-        #after: (batch, features[-1] * math.prod(map_shape))
+        # before: (batch, *map_shape, features[-1])
+        # after: (batch, features[-1] * math.prod(map_shape))
 
         z = self.encoder_linear(x)
-        #before:    (batch, features[-1] * math.prod(map_shape))
-        #after:     (batch, latent_dim)
+        # before:    (batch, features[-1] * math.prod(map_shape))
+        # after:     (batch, latent_dim)
 
         return z
 
     def decode(self, z):
 
         x = self.decoder_linear(z)
-        #before: (batch, latent_dim)
-        #after: (batch, features[-1] * math.prod(map_shape))
+        # before: (batch, latent_dim)
+        # after: (batch, features[-1] * math.prod(map_shape))
 
         x = x.view(
             -1,
             self.features[-1],
             *self.map_shape
         )
-        #before: (batch, features[-1] * math.prod(map_shape))
-        #after: (batch, *map_shape, features[-1])
+        # before: (batch, features[-1] * math.prod(map_shape))
+        # after: (batch, *map_shape, features[-1])
 
         x = self.decoder_conv(x)
-        #before: (batch, *map_shape,features[-1])
-        #after: (batch, *map_shape, num_output_neurons)
+        # before: (batch, *map_shape,features[-1])
+        # after: (batch, *map_shape, num_output_neurons)
 
         x = x.permute(0, 2, 3, 4, 1)
 
@@ -119,13 +122,3 @@ class Conv3dAutoencoder(nn.Module):
         x_hat = self.decode(z)
 
         return x_hat
-
-
-@dataclass
-class TrainedCNNAutoencoder:
-    model_state_dict: dict
-    latent_dim: int
-    features: tuple[int, ...]
-    map_shape: tuple[int, ...]
-    kernel_size: int
-    activation: type[nn.Module]

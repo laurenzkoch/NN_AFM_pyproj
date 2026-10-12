@@ -2,7 +2,7 @@ NN_AFM_pyproj
 =============
 
 Automatisierte Motor-CAD-Simulationen und neuronale Netze für Axialflussmaschinen
-Dokumentationsstand: 24.09.2026
+Dokumentationsstand: 05.10.2026
 
 Das Projekt erzeugt parametrierte Maschinengeometrien und Betriebspunktkennfelder,
 berechnet sie mit Ansys Motor-CAD und speichert die Ergebnisse als CSV. Anschließend
@@ -29,13 +29,16 @@ NN_AFM_pyproj/
 |-- README.txt
 |-- environment.yml                 Conda-Umgebung mit Versionsvorgaben
 |-- requirements.txt                Gemeinsame Python-Paketliste mit Versionen
+|-- src.zip                         Quellcodearchiv, kein aktiver Einstieg
 |-- data/
 |   |-- MCAD_Results/                Simulations-CSV und ältere Datenbestände
+|   |-- logs/                       Gemeinsame Simulations- und Fehlerprotokolle
 |   |-- plots/                      Trainingskurven und Auswertungsdiagramme
 |   '-- trained_nn/                 Aufbereitete Daten und trainierte Modelle
 '-- src/
     |-- config/
     |   |-- config_paths.py         Datei-, Programm- und Ausgabepfade
+    |   |-- config_logging.py       Logging für Hauptprozess und Worker
     |   '-- config_mcad_parameters.py
     |                               Parameter, Wertebereiche und NN-Merkmale
     |-- executable_files/
@@ -80,9 +83,9 @@ Aus dem Projektordner in einer für Conda eingerichteten PowerShell:
     conda activate Env_NN_AFM
 
 environment.yml bindet requirements.txt über den pip-Abschnitt direkt ein.
-requirements.txt enthält alle Python-Pakete für Simulation, Datenaufbereitung,
+requirements.txt enthält die Python-Pakete für Simulation, Datenaufbereitung,
 Training und Auswertung. Die Versionsvorgaben für die wissenschaftlichen Pakete
-und requests sind mit der eingerichteten Umgebung abgeglichen.
+und requests stehen in diesen beiden Dateien.
 
 Conda installiert zuerst Python, Tk und die aufgeführten wissenschaftlichen
 Pakete sowie den HTTP-Unterbau für PyMotorCAD. Die anschließende Installation
@@ -156,6 +159,7 @@ Diese Werte müssen zur lokalen Installation passen.
 Die Datenpfade werden relativ zum Speicherort des Projekts ermittelt:
 
     PATH_DATA_MCAD_RESULTS    data/MCAD_Results
+    PATH_LOGS                 data/logs
     PATH_DATA_PLOTS           data/plots
     PATH_DATA_TRAINED_NN      data/trained_nn
 
@@ -203,20 +207,25 @@ DEFAULT_VALUES allein konfiguriert deshalb nicht das gesamte Motor-CAD-Modell.
 Vor dem Start die externen Pfade und das Basismodell prüfen. Umfang und Verhalten
 werden in src/executable_files/main_mcad_sim.py eingestellt.
 
-Aktuell liegen die Generatoren unter src/modules/simulation/generators. Die
-Imports in pipeline.py und machine_generator.py verweisen noch auf den alten
-Pfad src.modules.generators. Solange diese Imports nicht angepasst sind, scheitert
-der Start mit ModuleNotFoundError. Siehe Abschnitt 9.
+Die Generatoren liegen unter src/modules/simulation/generators. SimulationPipeline
+koordiniert Oberfläche und Ressourcen; MCADSimulation in run_simulation.py
+übernimmt CSV-Wiederverwendung, Batch-Verarbeitung und parallele Berechnungen.
 
 Aktuelle Werte des dortigen SimulationPipeline-Aufrufs:
 
     num_base_designs=1
-    num_lam_designs=5
+    num_lam_designs=30
     num_operation_points_per_dim=5
     num_kernel=4
     autostart=True
     start_eduvpn=False
     gen_type="v2"
+
+main_mcad_sim.py erzeugt außerdem eine multiprocessing.Queue für die Logmeldungen,
+startet den Log-Listener und übergibt log_queue an die Pipeline. Wer
+SimulationPipeline direkt verwendet, muss dieses erforderliche Argument ebenfalls
+bereitstellen. Die Pipeline prüft die vier numerischen Umfangsparameter auf
+Werte >= 1 und akzeptiert als gen_type ausschließlich "v1" oder "v2".
 
 Start:
 
@@ -241,19 +250,27 @@ v2 sampelt alle neun Lambda-Werte gemeinsam. Beide verwenden Latin-Hypercube-
 Sampling mit festen Seeds. Das Betriebspunktkennfeld ist ein äquidistantes
 kartesisches Raster mit O Werten je Achse.
 
-Die aktuelle Startkonfiguration erzeugt somit 5 Maschinengeometrien mit jeweils
-125 Betriebspunkten, insgesamt 625 geplante Simulationen. Verworfene Punkte
+Die aktuelle Startkonfiguration erzeugt somit 30 Maschinengeometrien mit jeweils
+125 Betriebspunkten, insgesamt 3.750 geplante Simulationen. Verworfene Punkte
 verringern die Zahl der gespeicherten CSV-Zeilen.
 
 Ein Basisdesign kombiniert Nut-/Polzahl, Luftspalt und Statorbohrung. Der Generator
 wählt unterschiedliche zulässige Nut-/Polpaare aus Nuten 3 ... 30 und Polen 2 ... 20.
 Die Anzahl der Basisdesigns ist durch die verfügbaren gültigen Paare begrenzt.
 
+Die Sampling-Seeds sind im Generator festgelegt: Statorbohrung 68, Luftspalt 17,
+Nut-/Polpaar-Auswahl 41, Lambda-Gruppen für v1 42/33/11 und für v2 42.
+Eine geänderte Stichprobenanzahl erzeugt neue Stichproben; größere Läufe sind
+nicht automatisch eine Erweiterung eines kleineren Laufs.
+
 Ablauf und Parallelisierung
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-- Die Pipeline erzeugt die Ergebnisdatei und verarbeitet je Geometrie einen
-  Batch mit O^3 Betriebspunkten.
+- Beim Erstellen von MCADSimulation werden die direkt unter data/MCAD_Results
+  liegenden CSV-Dateien als Datenbestand eingelesen. Die Pipeline legt danach
+  die Ziel-CSV an, falls sie noch nicht existiert.
+- Der Hintergrundthread verarbeitet Batches mit 4 * O^3 Betriebspunkten;
+  bei O=5 sind das bis zu 500 Punkte bzw. vier Geometrien je Batch.
 - Für jeden Batch wird ein Prozesspool erstellt. Jeder Worker öffnet eine eigene,
   sichtbare Motor-CAD-Instanz mit einer temporären Kopie des Basismodells.
 - Die Zahl der Worker wird auf die gewünschte Anzahl, verfügbare CPUs und die
@@ -263,10 +280,15 @@ Ablauf und Parallelisierung
   angepasst.
 - Vor der magnetischen Berechnung werden Geometrie, Wickelbarkeit und
   Betriebspunktgrenzen geprüft.
-- Nur erfolgreiche Berechnungen werden gespeichert. Ungültige Geometrien und
-  fehlgeschlagene magnetische Berechnungen erscheinen als "Dropped".
+- Bereits bekannte Parametersätze werden aus dem geladenen CSV-Bestand erkannt:
+  Treffer in der Zieldatei werden übersprungen, Treffer in anderen Dateien
+  werden in die Zieldatei kopiert. Dafür ist keine neue Berechnung erforderlich.
+- Neue Berechnungen werden bei Erfolg gespeichert; übernommene CSV-Ergebnisse
+  werden ebenfalls angehängt. Ungültige Geometrien und fehlgeschlagene
+  magnetische Berechnungen erscheinen als "Dropped".
 - Fehler beim Setzen oder Lesen von Motor-CAD-Variablen können den Lauf abbrechen.
-- Die Oberfläche zählt simulierte, verworfene und bereits vorhandene Punkte.
+- Die Oberfläche zählt simulierte, verworfene, bereits vorhandene und aus
+  anderen CSV-Dateien kopierte Punkte.
 
 Die Randbedingungen prüfen unter anderem Durchmesser und Wellenabstände,
 Magnetüberdeckung, axiale Einbaulänge, Nutabmessungen, Wickelbarkeit und einen
@@ -293,13 +315,52 @@ Zum Fortsetzen eine vorhandene Datei im Pipeline-Aufruf angeben:
     csv_path="Results_EMagnetic_simulation_...csv"
 
 Ein relativer Dateiname wird unter data/MCAD_Results aufgelöst. Vorhandene Dateien
-werden nicht überschrieben; neue erfolgreiche Ergebnisse werden angehängt.
-Parametersätze, die innerhalb einer absoluten Toleranz von 1e-4 je generiertem
-Parameter bereits vorkommen, werden übersprungen.
+werden nicht überschrieben; neue erfolgreiche oder übernommene Ergebnisse werden
+angehängt. Parametersätze gelten als bekannt, wenn alle vom Generator gesetzten
+Werte innerhalb einer absoluten Toleranz von 1e-4 übereinstimmen.
+
+Die Wiederverwendung erfolgt auch ohne csv_path automatisch aus allen beim
+Erstellen der Simulation geladenen CSV-Dateien direkt im Ergebnisordner.
+Unterordner wie Ablage werden nicht durchsucht. Leere, syntaktisch unlesbare
+oder mit falscher Textkodierung gelesene Dateien sowie Dateien mit fehlenden
+CSV_PARAMETERS-Spalten werden mit einer Warnung übersprungen. Eine Datei mit
+gültigem Header und ohne Datenzeilen ist als leerer Datenbestand zulässig.
+
+Der geladene Bestand ist eine Momentaufnahme und wird während des Laufs nicht
+um neu geschriebene Ergebnisse erweitert. Bei Treffern in mehreren Dateien
+entscheidet die zuerst gefundene Datei; die Zieldatei wird nicht ausdrücklich
+bevorzugt. Die Wiederverwendung garantiert daher keine allgemeine Entfernung
+aller Dubletten in der Ziel-CSV.
 
 Für das Fortsetzen müssen CSV-Schema, Generatorparameter und Basismodell
 zusammenpassen. Änderungen an Materialien oder anderen Basismodell-Einstellungen
 werden durch diese Dublettenprüfung nicht erkannt.
+
+Dateien mit anderem Basismodell oder anderen nicht verglichenen Einstellungen
+deshalb nicht im automatisch durchsuchten Hauptordner belassen. Die reine
+Spaltenprüfung bestätigt weder identische Modellannahmen noch die Gültigkeit
+aller numerischen Werte.
+
+Logging
+~~~~~~~
+
+src/config/config_logging.py leitet die Meldungen des Hauptprozesses und der
+Motor-CAD-Worker über eine gemeinsame multiprocessing.Queue an einen QueueListener
+weiter. main_mcad_sim.py startet und beendet diesen Listener.
+
+Unter data/logs werden beim Start zwei UTF-8-Dateien erzeugt:
+
+    <JJJJ.MM.TT_HH-MM-SS>_info.txt
+    <JJJJ.MM.TT_HH-MM-SS>_error.txt
+
+Konsole und info.txt erhalten Meldungen ab INFO, einschließlich Warnungen und
+Fehlern; error.txt enthält Meldungen ab ERROR. Der Logordner wird automatisch
+angelegt. Die Dateien enthalten Zeitstempel, Schweregrad, Modul und Meldung;
+bei logger.exception zusätzlich die Fehlerdetails. Dazu gehören Meldungen zur
+Initialisierung und Wicklung der Worker sowie verworfene Designs und Rechenfehler.
+
+Das zentrale Logging wird vom Simulations-Startskript eingerichtet. Training,
+Diagrammerstellung und machine_test.py richten selbst keinen solchen Listener ein.
 
 Temporäre Dateien und eduVPN
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -327,17 +388,17 @@ Die aktuellen Ergebnisdateien verwenden:
 
 Die Zeilenreihenfolge hängt von der Fertigstellung der parallelen Worker ab.
 
-SIM_INPUT_PARAMETERS legt trotz seines Namens die gesamte Reihenfolge fest:
+CSV_PARAMETERS legt die gesamte Reihenfolge fest:
 16 Geometrieparameter + 6 Betriebsparameter + 7 Ergebnisgrößen = 29 Spalten.
 
 Geometrieparameter:
 
-    AFM_D_Rotor, Stator_Lam_Dia, Stator_Bore, Airgap, Pole_Number,
-    Slot_Number, Slot_Width, Slot_Opening, Slot_Depth, Motor_Length,
-    Rotor_Lam_Length, Stator_Lam_Length, Magnet_Length, Magnet_Embed_Depth,
-    Magnet_Thickness, Magnet_Arc_[ED]
+    Pole_Number, Slot_Number, Airgap, Stator_Bore, Stator_Lam_Dia,
+    AFM_D_Rotor, Magnet_Arc_[ED], Magnet_Length, Magnet_Thickness,
+    Slot_Depth, Slot_Width, Slot_Opening, Magnet_Embed_Depth,
+    Rotor_Lam_Length, Stator_Lam_Length, Motor_Length
 
-Betriebsparameter:
+Betriebsparameter / OP_PARAMETERS:
 
     ShaftSpeed, RMSPhaseCurrent_D, RMSPhaseCurrent_Q,
     RMSCurrentDensity, PeakCurrent, PhaseAdvance
@@ -353,20 +414,31 @@ Ergebnisgrößen / OUTPUT_NEURON_LIST, in Modellreihenfolge:
     RotorIronLoss_Total
 
 Lambda-Werte und d-/q-Stromdichten sind abgeleitete Trainingsmerkmale.
-Sie werden von DataTensor berechnet und stehen nicht als eigene Spalten in
+Sie werden von DataLoader berechnet und stehen nicht als eigene Spalten in
 diesem CSV-Exportschema.
 
 Die derzeit direkt in data/MCAD_Results vorhandenen Hauptdateien sind:
 
     Results_EMagnetic_simulation_3_3_5_GenType-v1_18.09.2026_13-52-26_CEST.csv
         10.000 Datenzeilen; 80 vollständige Geometrien mit je 125 Punkten.
-        Der Dateiname in main_nn.py muss vor dem Training angepasst werden.
+        Diese Datei ist aktuell in main_nn.py als Trainingsquelle eingestellt.
 
-    Results_EMagnetic_simulation_2_3_5_GenType-v2_22.09.2026_19-36-34_CEST.csv
-        750 Datenzeilen; 6 vollständige Geometrien mit je 125 Punkten.
+    Results_EMagnetic_simulation_1_10_5_GenType-v2_04.10.2026_19-31-19_CEST.csv
+        1.250 Datenzeilen; 10 Geometrien mit je 125 Zeilen.
 
-Beide Dateien besitzen ein 5 x 5 x 5-Raster. Ältere CSV-Dateien in den
-Unterordnern können abweichende Spalten oder unvollständige Kennfelder enthalten.
+    Results_EMagnetic_simulation_1_20_5_GenType-v2_04.10.2026_19-33-27_CEST.csv
+        2.375 Datenzeilen; 19 Geometrien mit je 125 Zeilen.
+
+    Results_EMagnetic_simulation_1_30_5_GenType-v2_04.10.2026_19-41-31_CEST.csv
+        3.500 Datenzeilen; 28 Geometrien mit je 125 Zeilen.
+
+    Results_EMagnetic_simulation_1_40_5_GenType-v2_04.10.2026_20-06-28_CEST.csv
+        Nur der Header, noch keine Datenzeilen; nicht als Trainingsquelle geeignet.
+
+Die nicht leeren Dateien gehören zu Läufen mit O=5. Die Datenaufbereitung prüft
+zusätzlich die Vollständigkeit und Eindeutigkeit der tatsächlichen Betriebspunkte.
+Ältere CSV-Dateien in Ablage können abweichende Spalten oder unvollständige
+Kennfelder enthalten. Zeilenzahlen beschreiben den Bestand am Dokumentationsdatum.
 
 
 6. Datenaufbereitung und neuronale Netze
@@ -374,18 +446,17 @@ Unterordnern können abweichende Spalten oder unvollständige Kennfelder enthalt
 
 Einstieg: src/executable_files/main_nn.py
 
-Vor dem Training den Dateinamen in der Variablen "file" setzen. DataTensor liest
+Vor dem Training den Dateinamen in der Variablen "file" setzen. DataLoader liest
 diese Datei aus data/MCAD_Results. Das Skript wählt nicht automatisch die neueste
 Simulation und führt vorhandene CSV-Dateien nicht zusammen.
 
-Der aktuell im Skript eingetragene Name enthält noch kein "GenType-v1" und
-existiert nicht mehr unter data/MCAD_Results. Vor dem Start muss die Zuweisung
-für den vorhandenen v1-Datensatz deshalb lauten:
+Die aktuelle Zuweisung für den vorhandenen v1-Datensatz lautet:
 
     file = "Results_EMagnetic_simulation_3_3_5_GenType-v1_18.09.2026_13-52-26_CEST.csv"
 
-Mit dem unveränderten alten Dateinamen bricht das Training mit FileNotFoundError
-ab. Alternativ kann der vorhandene v2-Datensatz ausgewählt werden.
+Für einen anderen Datensatz diese Zuweisung anpassen. Die v2-Ergebnisdateien
+können ebenfalls ausgewählt werden, sofern mindestens fünf vollständige
+Kennfelder das Bereinigen der Daten überstehen.
 
 Start nach der Umgebungseinrichtung aus Abschnitt 2:
 
@@ -394,7 +465,7 @@ Start nach der Umgebungseinrichtung aus Abschnitt 2:
 Das Skript bereitet die Daten auf, trainiert zuerst das MLP und anschließend den
 3D-Autoencoder. Beide Trainings laufen aktuell ausdrücklich auf der CPU.
 
-Datenaufbereitung mit DataTensor
+Datenaufbereitung mit DataLoader
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. CSV einlesen und aus PeakCurrent und RMSCurrentDensity die Leiterfläche
@@ -427,7 +498,7 @@ Tensorform und Merkmalsreihenfolge
 N bezeichnet die Maschinenzahl, S/D/Q die Anzahl der Werte auf den Drehzahl-,
 d-Stromdichte- und q-Stromdichteachsen. Die Geometrie wird über das Kennfeld wiederholt.
 
-DataTensor verwendet standardmäßig OP_NEURONS als label_axis. Damit stimmen
+DataLoader verwendet standardmäßig OP_NEURONS als label_axis. Damit stimmen
 Kennfeldachsen und Betriebsmerkmale mit folgender Reihenfolge überein:
 
     ShaftSpeed, RMSPhaseCurrent_D_density, RMSPhaseCurrent_Q_density
@@ -490,7 +561,7 @@ Speicherorte
 ~~~~~~~~~~~~
 
     data/trained_nn/data.pkl
-        DataTensor-Objekt einschließlich Datenaufteilung und Normalisierungswerten.
+        DataLoader-Objekt einschließlich Datenaufteilung und Normalisierungswerten.
 
     data/trained_nn/trained_mlp.pt
         MLP-Gewichte und Architekturkonfiguration.
@@ -585,24 +656,14 @@ src/modules/data_managment/
     Aus der Projektwurzel starten und sowohl Projektwurzel als auch src in den
     Python-Suchpfad aufnehmen, wie in Abschnitt 2 beschrieben.
 
-"ModuleNotFoundError: No module named 'src.modules.generators'"
-    Der Generatorordner liegt jetzt unter src/modules/simulation/generators.
-    In src/modules/simulation/pipeline.py und src/executable_files/machine_test.py
-    muss der Import von AFMMachineGenerator auf
-    src.modules.simulation.generators.machine_generator zeigen. In
-    src/modules/simulation/generators/machine_generator.py muss map_generator
-    aus src.modules.simulation.generators.map_generator importiert werden.
-    Diese noch bestehenden Codeabweichungen sind durch Paketinstallationen oder
-    den zusätzlichen Suchpfad allein nicht behoben.
-
 Fehlendes Python-Paket
     Den tatsächlich gewählten Interpreter und die Installation aus environment.yml
     bzw. requirements.txt prüfen. Beide verwenden dieselben Python-Anforderungen;
     Tk/Tkinter gehört zur Python-/Conda-Installation.
 
 Trainings-CSV wird nicht gefunden
-    Den Dateinamen in main_nn.py an die vorhandene Datei mit "GenType-v1"
-    anpassen, wie in Abschnitt 6 beschrieben.
+    Die Variable file in main_nn.py und den tatsächlichen Bestand unter
+    data/MCAD_Results vergleichen. Der aktuell eingetragene v1-Dateiname existiert.
 
 Motor-CAD oder Basismodell wird nicht gefunden
     PATH_MCAD_EXE und PATH_MCAD_BASEFILE in config_paths.py prüfen.
@@ -610,14 +671,25 @@ Motor-CAD oder Basismodell wird nicht gefunden
 Motor-CAD startet, kann aber nicht rechnen
     Lizenzzugang und Basismodell prüfen. Die automatische eduVPN-Steuerung
     bestätigt nur den Programmstart. Rechenfehler und verletzte Randbedingungen
-    werden im Terminal ausgegeben.
+    werden in der Konsole und unter data/logs ausgegeben. error.txt kann
+    zusätzlich Details zu Geometrie-, Material- oder Spannungsgrenzen enthalten.
+
+Unerwartete Werte für "Already existing points" oder "Copied points"
+    Die Pipeline durchsucht alle kompatiblen CSV-Dateien direkt im Ergebnisordner.
+    Mehrere Dateien können denselben Parametersatz enthalten. Dateiauswahl,
+    Generator-Seeds und unveränderte Basismodell-Einstellungen prüfen.
+
+Ungültiger Simulationsumfang
+    num_kernel, num_base_designs, num_lam_designs und
+    num_operation_points_per_dim müssen >= 1 sein. Zu viele Basisdesigns für die
+    verfügbaren Nut-/Polpaare sowie ein unbekannter gen_type führen zu ValueError.
 
 Fehler beim Schließen des Fensters vor dem Simulationsstart
     Bei autostart=False führt das Schließen vor dem ersten Klick auf "Start"
     derzeit zu einem RuntimeError: Die Pipeline wartet auf einen noch nicht
     gestarteten Thread. Der anschließende stop()-Aufruf wird dann nicht erreicht.
 
-Zu wenige vollständige Maschinen für DataTensor
+Zu wenige vollständige Maschinen für DataLoader
     Mindestens fünf gültige, vollständige Kennfelder werden benötigt.
     Verworfene Simulationspunkte oder doppelte Betriebspunkte können dazu führen,
     dass ganze Maschinen bei der Aufbereitung entfernt werden.
@@ -640,19 +712,19 @@ Prüfskript und Tests
 
 Eine automatisierte Testsuite mit eigenständiger Testkonfiguration ist derzeit
 nicht vorhanden. src/executable_files/machine_test.py prüft generierte Geometrien
-mit get_generator(_type="v1") und test_boundary_conditions().
+mit get_generator(_type="v2") und test_boundary_conditions().
 
-Der _type-Aufruf ist korrigiert. Nach der Verschiebung des Generatorordners
-verhindern jedoch noch die oben beschriebenen alten Imports den Start.
-
-Start nach der Umgebungseinrichtung aus Abschnitt 2 und Korrektur der Imports:
+Start nach der Umgebungseinrichtung aus Abschnitt 2:
 
     python -m src.executable_files.machine_test
 
-Das Skript durchläuft neun Kombinationen mit B=3...5, L=3...5 und O=5. Daraus
-ergeben sich insgesamt 324.000 Parameterprüfungen einschließlich Betriebspunkten.
+Das Skript durchläuft drei Kombinationen mit B=1, L=3...5 und O=5. Für v2
+ergeben sich insgesamt 1.500 Parameterprüfungen einschließlich Betriebspunkten.
 Generierte Werte werden mit DEFAULT_VALUES ergänzt. Verletzte Randbedingungen
 und die Zahl verworfener Designs werden im Terminal ausgegeben.
+
+Die abschließende Ausgabe "Datapoints" verwendet noch die v1-Formel B * L^3 * O^3
+und zeigt deshalb 27.000 statt der tatsächlich durchlaufenen 1.500 Punkte an.
 
 Es wird keine Motor-CAD-Instanz gestartet und keine Ergebnis-CSV geschrieben.
 ansys-motorcad-core muss wegen des importierten Prüfmoduls dennoch installiert

@@ -1,14 +1,16 @@
-
+import math
 from typing import Generator, Any
+
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 from scipy.stats import qmc
-import math
 
+from src.config.config_mcad_parameters import SLOT_NUMBER, POLE_NUMBER, LAMBDA_1_1, LAMBDA_2_1, LAMBDA_3_1, LAMBDA_1_2, \
+    LAMBDA_2_2, LAMBDA_3_2, LAMBDA_1_3, LAMBDA_2_3, LAMBDA_3_3, STATOR_BORE, AIRGAP
 from src.modules.simulation.generators.map_generator import map_generator
-from src.config.config_mcad_parameters import *
 
 DATAPOINT_PARAMETERS: list[str] = []
+
 
 class AFMMachineGenerator:
 
@@ -16,19 +18,11 @@ class AFMMachineGenerator:
             self,
             num_base_designs: int,
             num_lam_designs: int,
-            num_operation_points_per_dim: int,
             num_data_points: int,
     ) -> None:
         self.num_base_designs = num_base_designs
         self.num_lam_designs = num_lam_designs
-        self.num_operation_points_per_dim = num_operation_points_per_dim
         self.num_datapoints = num_data_points
-
-    def __enter__(self):
-        return self
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        return
-
 
     def get_generator(self, _type: str) -> Generator[dict[str, float], None, None]:
 
@@ -40,7 +34,6 @@ class AFMMachineGenerator:
             case _:
                 raise ValueError(f"Unknown generator type: {_type}")
 
-
     @staticmethod
     def _find_pole_slot_pairs() -> list[tuple[int, int]]:
         pairs = []
@@ -50,7 +43,6 @@ class AFMMachineGenerator:
                 if slot % (3 * gcd) == 0 and slot > pole and slot / gcd <= 6:
                     pairs.append((slot, pole))
         return pairs
-
 
     def _select_pole_slot_pairs(self, seed: int = 41) -> np.ndarray:
         """Select well-spread [slot, pole] pairs from slots 3..30 and poles 2..20.
@@ -90,7 +82,6 @@ class AFMMachineGenerator:
         _, selected_indices = linear_sum_assignment(squared_distances)
         return pairs[selected_indices]
 
-
     @staticmethod
     def _sampling(
             num_of_points: int,
@@ -112,8 +103,7 @@ class AFMMachineGenerator:
             upper_bounds
         )
 
-
-    def _get_lambda_values_v1(self)-> list[Any]:
+    def _get_lambda_values_v1(self) -> list[Any]:
 
         seeds = [
             42,
@@ -221,15 +211,9 @@ class AFMMachineGenerator:
 
         slot_pole_samples: np.ndarray = self._select_pole_slot_pairs()
 
-        op_samples: np.ndarray = map_generator(
-            i_min_max=SHAFT_SPEED,
-            j_min_max=Q_CURRENT_DENSITY,
-            k_min_max=D_CURRENT_DENSITY,
-            num_operation_points_per_dim=self.num_operation_points_per_dim
-        )
+        op_samples: np.ndarray = map_generator()
 
         return stator_bore_samples, airgap_samples, slot_pole_samples, op_samples
-
 
     @staticmethod
     def _calculate_geometric(
@@ -318,9 +302,7 @@ class AFMMachineGenerator:
             "PhaseAdvance": math.degrees(math.atan2(-d_current_density, q_current_density)),
         }
 
-
-
-    def _lambda_generator_v1(self)-> Generator[dict[str, float], None, None]:
+    def _lambda_generator_v1(self) -> Generator[dict[str, float], None, None]:
 
         ##structure
         #   for lambda_1 in lambdas_1:
@@ -334,15 +316,14 @@ class AFMMachineGenerator:
         stator_bore_samples, airgap_samples, slot_pole_samples, op_samples = self._get_samples()
 
         for (
-            (airgap_sample,),
-            (slot_sample, pole_sample),
-            (stator_bore_sample,),
+                (airgap_sample,),
+                (slot_sample, pole_sample),
+                (stator_bore_sample,),
         ) in zip(airgap_samples, slot_pole_samples, stator_bore_samples):
             for (lambda_1_1, lambda_1_2, lambda_1_3) in lambdas[0]:
                 for (lambda_2_1, lambda_2_2, lambda_2_3) in lambdas[1]:
                     for (lambda_3_1, lambda_3_2, lambda_3_3) in lambdas[2]:
                         for (shaft_speed, q_current_density, d_current_density) in op_samples:
-
                             yield self._calculate_geometric(
                                 slot_sample,
                                 pole_sample,
@@ -362,7 +343,6 @@ class AFMMachineGenerator:
                                 d_current_density,
                             )
 
-
     def _lambda_generator_v2(self) -> Generator[dict[str, float], None, None]:
 
         lambdas = self._get_lambda_values_v2()
@@ -372,10 +352,10 @@ class AFMMachineGenerator:
                 (airgap_sample,),
                 (slot_sample, pole_sample),
                 (stator_bore_sample,)
-        ) in  zip(
-                airgap_samples,
-                slot_pole_samples,
-                stator_bore_samples,
+        ) in zip(
+            airgap_samples,
+            slot_pole_samples,
+            stator_bore_samples,
         ):
             for (
                     lambda_1_1,
@@ -390,7 +370,6 @@ class AFMMachineGenerator:
             ) in lambdas:
 
                 for (shaft_speed, q_current_density, d_current_density) in op_samples:
-
                     yield self._calculate_geometric(
                         slot_sample,
                         pole_sample,

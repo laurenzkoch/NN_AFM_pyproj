@@ -1,6 +1,6 @@
-
 import pandas as pd
 import plotly.express as px
+
 
 def plot_datapoints_plotly(
         x_column: pd.Series,
@@ -11,7 +11,6 @@ def plot_datapoints_plotly(
         ylabel: str | None = None,
         zlabel: str | None = None,
 ) -> None:
-
     if z_column is None:
         fig = px.scatter(
             x=x_column,
