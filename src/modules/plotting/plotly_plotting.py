@@ -3,13 +3,13 @@ import plotly.express as px
 
 
 def plot_datapoints_plotly(
-        x_column: pd.Series,
-        y_column: pd.Series,
-        z_column: pd.Series | None = None,
-        title: str | None = None,
-        xlabel: str | None = None,
-        ylabel: str | None = None,
-        zlabel: str | None = None,
+    x_column: pd.Series,
+    y_column: pd.Series,
+    z_column: pd.Series | None = None,
+    title: str | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    zlabel: str | None = None,
 ) -> None:
     if z_column is None:
         fig = px.scatter(
@@ -19,7 +19,7 @@ def plot_datapoints_plotly(
             labels={
                 "x": xlabel,
                 "y": ylabel,
-            }
+            },
         )
         fig.update_layout(
             xaxis_title=xlabel,
@@ -37,7 +37,7 @@ def plot_datapoints_plotly(
                 "y": ylabel,
                 "z": zlabel,
                 "color": zlabel or z_column.name,
-            }
+            },
         )
         fig.update_layout(
             scene=dict(

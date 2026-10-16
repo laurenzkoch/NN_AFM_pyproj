@@ -1,27 +1,43 @@
 import copy
-from typing import Any
+import logging
+import math
 
 import torch
 
+from src.modules.neuronal_networks.manipulating_data import MachineDataTensor
 from src.modules.neuronal_networks.NN_types.cnn_autoencoder import Conv3dAutoencoder
 from src.modules.neuronal_networks.NN_types.mlp_with_torch import MLP
-from src.modules.neuronal_networks.manipulating_data import MachineDataTensor
+
+logger = logging.getLogger(__name__)
 
 
 class NNTrainer:
-
     def __init__(
-            self,
-            learning_rate: float = 1e-3,  # not smaller than 0.00001
-            weight_decay: float = 1e-3,  #
-            num_epochs: int = 2000,
-            patience: int = 50,
+        self,
+        learning_rate: float = 1e-3,  # not smaller than 0.00001
+        weight_decay: float = 1e-3,  #
+        num_epochs: int = 2000,
+        patience: int = 50,
     ) -> None:
+        if type(patience) is not int or patience < 1:
+            raise ValueError("patience must be a positive integer.")
 
-        if patience < 1:
-            raise ValueError("patience must be >= 1")
-        if num_epochs < 1:
-            raise ValueError("num_epochs must be >= 1")
+        if type(num_epochs) is not int or num_epochs < 1:
+            raise ValueError("num_epochs must be a positive integer.")
+
+        if (
+            isinstance(learning_rate, bool)
+            or not math.isfinite(learning_rate)
+            or learning_rate <= 0
+        ):
+            raise ValueError("learning_rate must be finite and positive.")
+
+        if (
+            isinstance(weight_decay, bool)
+            or not math.isfinite(weight_decay)
+            or weight_decay < 0
+        ):
+            raise ValueError("weight_decay must be finite and non-negative.")
 
         # device
         self.torch_device = torch.device("cpu")
@@ -40,23 +56,27 @@ class NNTrainer:
         self.validation_data: MachineDataTensor
 
         self.best_validation_loss = float("inf")
-        self.best_model_state = None
+        self.best_model_state: dict[str, torch.Tensor] | None = None
         self.epochs_without_improvement: int
-        self.optimizer = None
+        self.optimizer: torch.optim.Optimizer | None = None
 
         self.neuronal_network: MLP | Conv3dAutoencoder
         self.trained_autoencoder: Conv3dAutoencoder | None
 
     def start(
-            self,
-            neuronal_network: MLP | Conv3dAutoencoder,
-            train_data: MachineDataTensor,  # (geo_tensor[G, 13], map_tensor[G, *map_size, 1])
-            validation_data: MachineDataTensor,
-            trained_autoencoder: Conv3dAutoencoder | None = None,
+        self,
+        neuronal_network: MLP | Conv3dAutoencoder,
+        train_data: MachineDataTensor,
+        validation_data: MachineDataTensor,
+        trained_autoencoder: Conv3dAutoencoder | None = None,
     ) -> MLP | Conv3dAutoencoder:
-
-        if isinstance(neuronal_network, Conv3dAutoencoder) and trained_autoencoder is not None:
-            raise ValueError("trained_autoencoder cannot be used with Conv3dAutoencoder")
+        if (
+            isinstance(neuronal_network, Conv3dAutoencoder)
+            and trained_autoencoder is not None
+        ):
+            raise ValueError(
+                "trained_autoencoder cannot be used with Conv3dAutoencoder"
+            )
 
         self.neuronal_network = neuronal_network
         self._move_to_device(self.neuronal_network)
@@ -70,7 +90,7 @@ class NNTrainer:
         self.optimizer = torch.optim.Adam(
             self.neuronal_network.parameters(),
             lr=self.learning_rate,
-            weight_decay=self.weight_decay
+            weight_decay=self.weight_decay,
         )
 
         # data
@@ -84,10 +104,12 @@ class NNTrainer:
 
         return self._training_process()
 
-    def _move_to_device(self, an_object: Any) -> Any:
+    def _move_to_device(
+        self,
+        an_object: torch.nn.Module | None,
+    ) -> None:
         if an_object is not None:
-            return an_object.to(self.torch_device)
-        return None
+            an_object.to(self.torch_device)
 
     def _freeze_autoencoder(self) -> None:
         if self.trained_autoencoder is not None:
@@ -96,11 +118,8 @@ class NNTrainer:
                 parameter.requires_grad = False
 
     def _get_small_map(self, map_prediction: torch.Tensor) -> torch.Tensor:
-
         if map_prediction.ndim != 5:
-            raise ValueError(
-                f"Expected 5D tensor, got shape {map_prediction.shape}"
-            )
+            raise ValueError(f"Expected 5D tensor, got shape {map_prediction.shape}")
         map_shape = tuple(map_prediction.shape[1:-1])
 
         indices = []
@@ -109,24 +128,41 @@ class NNTrainer:
             indices.append([0, middle_index, axis_size - 1])
 
         sparse_indices = torch.tensor(
-            indices,
-            dtype=torch.long,
-            device=self.torch_device
+            indices, dtype=torch.long, device=self.torch_device
         )
 
         small_map_pred = (
-            map_prediction
-            .index_select(1, sparse_indices[0])
+            map_prediction.index_select(1, sparse_indices[0])
             .index_select(2, sparse_indices[1])
             .index_select(3, sparse_indices[2])
         )
 
         return small_map_pred
 
-    def _calc_loss(
-            self,
-            true_for_training: bool
-    ) -> float:
+    def _checked_mse(
+        self,
+        target: torch.Tensor,
+        prediction: torch.Tensor,
+    ) -> torch.Tensor:
+        if target.shape != prediction.shape:
+            raise ValueError(
+                "Prediction and target shapes must match: "
+                f"prediction={tuple(prediction.shape)}, "
+                f"target={tuple(target.shape)}."
+            )
+
+        if target.numel() == 0:
+            raise ValueError("Cannot calculate loss for empty tensors.")
+
+        return self.criterion(prediction, target)
+
+    def _calc_loss(self, true_for_training: bool) -> float:
+        optimizer: torch.optim.Optimizer | None = self.optimizer
+
+        if optimizer is None:
+            raise RuntimeError(
+                "The trainer has not been initialized. Call start() first."
+            )
 
         if true_for_training:
             data = self.train_data
@@ -134,30 +170,51 @@ class NNTrainer:
             data = self.validation_data
 
         if true_for_training:
-            self.optimizer.zero_grad()
+            optimizer.zero_grad()
 
         if isinstance(self.neuronal_network, MLP):
             mlp_prediction = self.neuronal_network(data.geometry_tensor)
             if self.trained_autoencoder is not None:
-                map_prediction = self.trained_autoencoder.decode(
-                    mlp_prediction
-                )
+                map_prediction = self.trained_autoencoder.decode(mlp_prediction)
                 small_map_pred = self._get_small_map(map_prediction)
                 small_map = self._get_small_map(data.map_tensor)
-                loss = self.criterion(small_map, small_map_pred)
+                loss = self._checked_mse(small_map, small_map_pred)
             else:
                 map_prediction = mlp_prediction
-                loss = self.criterion(data.map_tensor, map_prediction)
+                loss = self._checked_mse(data.map_tensor, map_prediction)
 
-        elif isinstance(self.neuronal_network, Conv3dAutoencoder) and self.trained_autoencoder is None:
+        elif (
+            isinstance(self.neuronal_network, Conv3dAutoencoder)
+            and self.trained_autoencoder is None
+        ):
             map_prediction = self.neuronal_network(data.map_tensor)
-            loss = self.criterion(data.map_tensor, map_prediction)
+            loss = self._checked_mse(data.map_tensor, map_prediction)
         else:
             raise RuntimeError("Unknown neuronal network type")
 
+        if not bool(torch.isfinite(loss).item()):
+            phase: str = "training" if true_for_training else "validation"
+            raise FloatingPointError(
+                f"Non-finite {phase} loss: {loss.item()}. "
+                "Check input data, normalization and model outputs."
+            )
+
         if true_for_training:
             loss.backward()
-            self.optimizer.step()
+
+            for name, parameter in self.neuronal_network.named_parameters():
+                gradient: torch.Tensor | None = parameter.grad
+
+                if gradient is None:
+                    continue
+
+                if not bool(torch.isfinite(gradient).all().item()):
+                    raise FloatingPointError(
+                        f"Non-finite gradient in parameter '{name}'. "
+                        "Optimizer step was skipped."
+                    )
+
+            optimizer.step()
 
         return loss.item()
 
@@ -171,12 +228,9 @@ class NNTrainer:
         return self._calc_loss(true_for_training=False)
 
     def _early_stopping(self, validation_loss: float) -> bool:
-
         if validation_loss < self.best_validation_loss - 1e-6:
             self.best_validation_loss = validation_loss
-            self.best_model_state = copy.deepcopy(
-                self.neuronal_network.state_dict()
-            )
+            self.best_model_state = copy.deepcopy(self.neuronal_network.state_dict())
             self.epochs_without_improvement = 0
         else:
             self.epochs_without_improvement += 1
@@ -187,16 +241,17 @@ class NNTrainer:
             return False
 
     def _training_process(self) -> MLP | Conv3dAutoencoder:
-
         for epoch in range(self.num_epochs):
             self._train()
             validation_loss = self._validation()
             if self._early_stopping(validation_loss):
-                print(f"Early stopping after {epoch + 1} epochs.")
+                logger.info(
+                    "Early stopping after %d epochs; best validation loss: %.6g",
+                    epoch + 1,
+                    self.best_validation_loss,
+                )
                 break
         if self.best_model_state is not None:
-            self.neuronal_network.load_state_dict(
-                self.best_model_state
-            )
+            self.neuronal_network.load_state_dict(self.best_model_state)
 
         return self.neuronal_network

@@ -4,22 +4,23 @@ import logging
 import math
 import time
 from pathlib import Path
+from types import TracebackType
+from typing import Self
 
 import ansys.motorcad.core as pymotorcad
 
-from src.config.config_mcad_parameters import DEFAULT_VALUES, CSV_PARAMETERS
-from src.config.config_paths import PATH_MCAD_EXE, PATH_MCAD_BASEFILE
+from src.config.config_mcad_parameters import CSV_PARAMETERS, DEFAULT_VALUES
+from src.config.config_paths import PATH_MCAD_BASEFILE, PATH_MCAD_EXE
 
 logger = logging.getLogger(__name__)
 
 
 def _design_to_string(
-        parameter_list: list[str],
-        value_list: list[float | int],
+    parameter_list: list[str],
+    value_list: list[float | int],
 ) -> str:
     return "\n".join(
-        f"\t\t{var}: {value}"
-        for var, value in zip(parameter_list, value_list)
+        f"\t\t{var}: {value}" for var, value in zip(parameter_list, value_list)
     )
 
 
@@ -27,19 +28,15 @@ def test_boundary_conditions(parameter_list: list[str], values: list[float]) -> 
     keys = parameter_list
 
     if len(keys) != len(values):
-        logger.exception("The number of keys does not match the number of values.")
+        logger.error("The number of keys does not match the number of values.")
         raise ValueError("The number of keys does not match the number of values.")
 
-    parameter_dict = {
-        k: float(v)
-        for k, v in zip(keys, values)
-    }
+    parameter_dict = {k: float(v) for k, v in zip(keys, values)}
 
     # radial - stator
     stator_lam_dia = parameter_dict["Stator_Lam_Dia"]
     stator_bore = parameter_dict["Stator_Bore"]
     slot_width = parameter_dict["Slot_Width"]
-    tooth_tip_angle = parameter_dict["Tooth_Tip_Angle"]
 
     # radial - rotor
     afm_d_rotor = parameter_dict["AFM_D_Rotor"]
@@ -63,10 +60,9 @@ def test_boundary_conditions(parameter_list: list[str], values: list[float]) -> 
     airgap = parameter_dict["Airgap"]
     magphases = int(parameter_dict["MagPhases"])
 
-    dia_mag_i = (afm_d_rotor - 2 * magnet_embed_depth - 2 * magnet_thickness)
-    dia_mag_a = (afm_d_rotor - 2 * magnet_embed_depth)
+    dia_mag_i = afm_d_rotor - 2 * magnet_embed_depth - 2 * magnet_thickness
+    dia_mag_a = afm_d_rotor - 2 * magnet_embed_depth
     activ_length = min(stator_lam_dia, dia_mag_a) - max(stator_bore, dia_mag_i)
-    mean_dia_of_mag_length = (dia_mag_a + dia_mag_i) / 2
     stator_width_per_slot = math.pi * stator_bore / slot_number
     pole_pairs = int(pole_number / 2)
     winding_gcd = math.gcd(slot_number, pole_pairs)
@@ -75,11 +71,13 @@ def test_boundary_conditions(parameter_list: list[str], values: list[float]) -> 
     # operation points
     phaseadvanced = parameter_dict["PhaseAdvance"]
 
-    TOL = 1e-6  # mm
+    tol = 1e-6  # mm
 
     # radial - stator
     if stator_bore >= stator_lam_dia:
-        logger.warning("Warning: Stator bore is greater than stator lamination diameter.")
+        logger.warning(
+            "Warning: Stator bore is greater than stator lamination diameter."
+        )
         return False
     if stator_bore <= shaft_dia:
         logger.warning("Warning: Stator bore is less than shaft diameter.")
@@ -87,15 +85,23 @@ def test_boundary_conditions(parameter_list: list[str], values: list[float]) -> 
 
     # radial - rotor
     if dia_mag_i <= shaft_dia:
-        logger.warning("Warning: Magnets too thick for rotor diameter or rotor diameter is less than shaft diameter.")
+        logger.warning(
+            "Warning: Magnets too thick for rotor diameter "
+            "or rotor diameter is less than shaft diameter."
+        )
         return False
     if shaft_hole_diameter >= stator_lam_dia:
-        logger.warning("Warning: Shaft hole diameter is greater than stator lamination diameter.")
+        logger.warning(
+            "Warning: Shaft hole diameter is greater than stator lamination diameter."
+        )
         return False
 
     # axial
-    if motor_length < (2 * (stator_lam_length + airgap + magnet_length) + rotor_lam_length) - TOL:
-        logger.warning(f"Warning: Motor length is too short.")
+    if (
+        motor_length
+        < (2 * (stator_lam_length + airgap + magnet_length) + rotor_lam_length) - tol
+    ):
+        logger.warning("Warning: Motor length is too short.")
         return False
     if slot_depth >= stator_lam_length:
         logger.warning("Warning: Slot depth is greater than stator lamination length.")
@@ -107,9 +113,13 @@ def test_boundary_conditions(parameter_list: list[str], values: list[float]) -> 
     # winding
     if not winding_ratio.is_integer() or winding_ratio < 1:
         logger.warning(
-            "Warning: Winding is not feasible. "
-            f"Slot_Number / MagPhases / gcd(Pole_Number, Slot_Number) = "
-            f"{slot_number} / {magphases} / {winding_gcd} = {winding_ratio:.6f}."
+            "Winding is not feasible. "
+            "Slot_Number / MagPhases / gcd(Pole_Number, Slot_Number) "
+            "= %s / %s / %s = %.6f.",
+            slot_number,
+            magphases,
+            winding_gcd,
+            winding_ratio,
         )
         return False
     if slot_width >= stator_width_per_slot:
@@ -129,17 +139,31 @@ def test_boundary_conditions(parameter_list: list[str], values: list[float]) -> 
 
     # operation points
     if phaseadvanced < 0 or phaseadvanced >= 90:
-        logger.warning("Warning: Phase advance is out of bounds. It should be in the range [0, 90).")
+        logger.warning(
+            "Warning: Phase advance is out of bounds. "
+            "It should be in the range [0, 90)."
+        )
         return False
 
     return True
 
 
 class MCADProcessor:
-
     def __init__(self) -> None:
         pymotorcad.set_motorcad_exe(str(PATH_MCAD_EXE))
         self.mcad_process: pymotorcad.MotorCAD = pymotorcad.MotorCAD()
+
+    def __enter__(self) -> Self:
+        self.start()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        self.close()
 
     def start(self) -> None:
         self.mcad_process.set_variable("MessageDisplayState", 2)
@@ -149,22 +173,14 @@ class MCADProcessor:
         try:
             self.mcad_process.quit()
             time.sleep(2)
-        except Exception as exc:
-            logger.error(f"Error while closing MCAD: {exc}")
-
-    def __enter__(self) -> 'MCADProcessor':
-        self.start()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        self.close()
-        return None
+        except Exception:
+            logger.exception("Error while closing MCAD.")
 
     def open_motorcad_file(self, file_path: str | Path = PATH_MCAD_BASEFILE) -> None:
         file_path = Path(file_path)
 
         if not file_path.exists():
-            logger.exception(f"File not found: {file_path}")
+            logger.error("File not found: %s", file_path)
             raise FileNotFoundError(f"File not found: {file_path}")
 
         self.mcad_process.load_from_file(str(file_path))
@@ -173,29 +189,36 @@ class MCADProcessor:
         try:
             self.mcad_process.set_variable(variable_name, value)
         except Exception as exc:
-            logger.exception(f"Failed to set variable {variable_name} to value {value}.")
-            raise ValueError(f"Failed to set variable {variable_name} to value {value}.") from exc
+            logger.exception(
+                "Failed to set variable %s to value %s.",
+                variable_name,
+                value,
+            )
+            raise ValueError(
+                f"Failed to set variable {variable_name} to value {value}."
+            ) from exc
 
     def get_value_from_mcad(self, variable_name: str) -> float:
         try:
             return float(self.mcad_process.get_variable(variable_name))
         except Exception as exc:
-            logger.exception(f"Failed to get variable {variable_name} from MotorCAD.")
-            raise ValueError(f"Failed to get variable {variable_name} from MotorCAD.") from exc
+            logger.exception(
+                "Failed to get variable %s from MotorCAD.",
+                variable_name,
+            )
+            raise ValueError(
+                f"Failed to get variable {variable_name} from MotorCAD."
+            ) from exc
 
     def do_calculation(self) -> bool:
         try:
             self.mcad_process.do_magnetic_calculation()
             return True
         except pymotorcad.MotorCADError as exc:
-            logger.error(
-                "Motor-CAD calculation failed: %s",
-                exc
-            )
+            logger.error("Motor-CAD calculation failed: %s", exc)
             return False
 
     def execute_mcad_simulation(self) -> tuple[list[float] | None, bool]:
-
         def get_values(var_list: list[str]) -> list[float]:
             return [self.get_value_from_mcad(var) for var in var_list]
 
@@ -203,7 +226,6 @@ class MCADProcessor:
         all_values: list[float] = get_values(all_parameters)
 
         if test_boundary_conditions(all_parameters, all_values):
-
             if self.do_calculation():
                 value_row = get_values(CSV_PARAMETERS)
 
@@ -212,12 +234,10 @@ class MCADProcessor:
                 # _print_design(OUTPUT_NEURON_LIST, output_values)
                 return value_row, True
 
-
             else:
                 logger.error(
                     "Calculation failed\n%s",
                     _design_to_string(all_parameters, all_values),
-
                 )
                 return None, False
         else:

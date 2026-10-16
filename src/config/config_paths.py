@@ -14,4 +14,8 @@ PATH_DATA_PLOTS: Path = PATH_DATA / "plots"
 PATH_DATA_TRAINED_NN: Path = PATH_DATA / "trained_nn"
 
 PATH_eduVPN_EXE: Path = Path("C:\\Program Files\\eduVPN\\Core\\eduVPN.Client.exe")
-PATH_MCAD_EXE: Path = Path("C:\\Program Files\\AnsysMotorCAD\\v252\\Motor-CAD_2025_2_1.exe")
+PATH_MCAD_EXE: Path = Path(
+    "C:\\Program Files\\AnsysMotorCAD\\v252\\Motor-CAD_2025_2_1.exe"
+)
+MCAD_DEPENDENCY_REVISION = "materials_and_solver_2026_10_13"
+MCAD_DEPENDENCY_FILES: tuple[Path, ...] = ()

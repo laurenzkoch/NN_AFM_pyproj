@@ -1,13 +1,20 @@
+from src.config.config_logging import configure_application_logging
 from src.modules.simulation.sim_pipeline import SimulationPipeline
 
 
-def main():
+def main() -> None:
+    configure_application_logging()
+
+    combinations: list[tuple[int, int]] = [
+        (1, 2),
+        (1, 3),
+    ]
+
     pipeline = SimulationPipeline(
-        num_base_designs=1,
-        num_lam_designs=30,
+        design_combinations=combinations,
         start_eduvpn=False,
         gen_type="v2",
-        # csv_path="Results_EMagnetic_simulation_1_10_5_GenType-v2_30.09.2026_15-08-54_CEST.csv",
+        num_workers=4,
     )
 
     pipeline.start()

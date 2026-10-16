@@ -1,48 +1,59 @@
-from src.config.config_mcad_parameters import *
+import math
 
-from src.modules.process.motor_cad_processes.mcad_processing import test_boundary_conditions
-from src.modules.simulation.generators.machine_generator import AFMMachineGenerator
+from src.config.config_mcad_parameters import DEFAULT_VALUES, MAP_SIZE
+from src.modules.process.motor_cad_processes.mcad_processing import (
+    test_boundary_conditions,
+)
+from src.modules.simulation.generators.machine_generator import (
+    AFMMachineGenerator,
+)
 
-num_base_designs: int = 100
-num_lam_designs: int = 100
-num_operation_points_per_dim: int = 5
-num_datapoints = num_base_designs * num_lam_designs ** 3 * num_operation_points_per_dim ** 3
 
-i_max = 1
-j_max = 5
-_sum = 0
+def main() -> None:
+    combinations: tuple[tuple[int, int], ...] = (
+        (1, 3),
+        (1, 4),
+        (1, 5),
+    )
+    total_points: int = 0
 
-for i in range(1, i_max + 1):
-    for j in range(3, j_max + 1):
-        _sum += i * j ** 3 * 5 ** 3
-        with AFMMachineGenerator(
-                num_base_designs=i,
-                num_lam_designs=j,
-                num_operation_points_per_dim=5,
-                num_data_points=i * j ** 3 * 5 ** 3
-        ) as generator:
+    for num_base_designs, num_lam_designs in combinations:
+        # Punktzahl für Generator v2.
+        point_count: int = num_base_designs * num_lam_designs * math.prod(MAP_SIZE)
+        total_points += point_count
 
-            design_counter = 0
-            drop_counter = 0
+        generator: AFMMachineGenerator = AFMMachineGenerator(
+            num_base_designs=num_base_designs,
+            num_lam_designs=num_lam_designs,
+            num_data_points=point_count,
+        )
 
-            for design in generator.get_generator(_type="v2"):
+        checked_points: int = 0
+        rejected_points: int = 0
 
-                design_counter += 1
+        for point in generator.get_generator(_type="v2"):
+            checked_points += 1
 
-                default_values = DEFAULT_VALUES.copy()
-                for key, value in design.items():
-                    default_values[key] = value
+            parameters: dict[str, float] = DEFAULT_VALUES.copy()
+            parameters.update(point)
 
-                parameter_name: list[str] = list(default_values.keys())
-                parameter_values: list[float] = list(default_values.values())
+            parameter_names: list[str] = list(parameters)
+            parameter_values: list[float] = list(parameters.values())
 
-                if not test_boundary_conditions(parameter_name, parameter_values):
-                    print("________TEST FAILED FOR:____________")
-                    for _var, _value in default_values.items():
-                        print(f"{_var}: {_value}")
-                    drop_counter += 1
+            if not test_boundary_conditions(
+                parameter_names,
+                parameter_values,
+            ):
+                rejected_points += 1
+                print(f"Boundary check failed: {parameters}")
 
-            print(
-                f"#############TEST COMPLETED: {drop_counter} from {design_counter} designs failed ##################")
+        print(
+            f"Combination ({num_base_designs}, {num_lam_designs}): "
+            f"{rejected_points} of {checked_points} points rejected."
+        )
 
-print(f"Datapoints: {_sum}")
+    print(f"Expected operating points: {total_points}")
+
+
+if __name__ == "__main__":
+    main()

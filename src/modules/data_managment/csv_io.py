@@ -1,7 +1,7 @@
 import csv
 import logging
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import pandas as pd
 
@@ -21,14 +21,11 @@ def create_csv_file(path: Path, columns_list: list[str]) -> None:
 
 
 def import_data_from_csv(path_file: Path) -> pd.DataFrame:
-    data_df = pd.read_csv(path_file, encoding='utf-8', sep=";", decimal=",")
+    data_df = pd.read_csv(path_file, encoding="utf-8", sep=";", decimal=",")
     return data_df
 
 
-def write_row_in_csv(
-        path_results: Path,
-        value_row: Iterable[float]
-) -> None:
+def write_row_in_csv(path_results: Path, value_row: Iterable[float]) -> None:
     with open(path_results, mode="a", newline="", encoding="utf-8") as file:
         writer = csv.writer(file, delimiter=";", quotechar='"')
         formatted_value_row = [
@@ -39,8 +36,8 @@ def write_row_in_csv(
 
 
 def write_from_csv_in_csv(
-        input_folder: Path,
-        output_file: Path,
+    input_folder: Path,
+    output_file: Path,
 ) -> None:
     csv_files = sorted(input_folder.glob(pattern="*.csv"))
     if not csv_files:
@@ -50,8 +47,7 @@ def write_from_csv_in_csv(
         writer = csv.writer(outfile, delimiter=";", quotechar='"')
 
         for csv_file in csv_files:
-
-            with open(csv_file, mode="r", newline="", encoding="utf-8") as infile:
+            with open(csv_file, newline="", encoding="utf-8") as infile:
                 reader = csv.reader(infile, delimiter=";", quotechar='"')
 
                 for row in reader:

@@ -1,74 +1,102 @@
+from __future__ import annotations
+
 import logging
 import logging.handlers
 from datetime import datetime
-from multiprocessing import Queue
+from multiprocessing.queues import Queue as ProcessQueue
+from pathlib import Path
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from src.config.config_paths import PATH_LOGS
 
 
-def setup_main_logging(log_queue: Queue):
-    PATH_LOGS.mkdir(
-        parents=True,
-        exist_ok=True,
+def configure_application_logging() -> None:
+    PATH_LOGS.mkdir(parents=True, exist_ok=True)
+
+    timestamp: str = datetime.now(ZoneInfo("Europe/Berlin")).strftime(
+        "%Y%m%d_%H%M%S_%f"
     )
 
-    current_time = datetime.now(
-        ZoneInfo("Europe/Berlin")
-    ).strftime("%Y.%m.%d_%H-%M-%S")
+    run_id: str = uuid4().hex[:8]
 
-    formatter = logging.Formatter(
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(
+                PATH_LOGS / f"{timestamp}_{run_id}_application.log",
+                encoding="utf-8",
+            ),
+        ],
+        force=True,
+    )
+
+
+def setup_main_logging(
+    log_queue: ProcessQueue[logging.LogRecord],
+) -> logging.handlers.QueueListener:
+    PATH_LOGS.mkdir(parents=True, exist_ok=True)
+
+    root_logger: logging.Logger = logging.getLogger()
+
+    # Die bereits durch configure_application_logging()
+    # eingerichtete Anwendungsdatei weiterverwenden.
+    log_path: Path | None = None
+
+    for handler in root_logger.handlers:
+        if isinstance(handler, logging.FileHandler):
+            log_path = Path(handler.baseFilename)
+            break
+
+    if log_path is None:
+        timestamp: str = datetime.now(ZoneInfo("Europe/Berlin")).strftime(
+            "%Y%m%d_%H%M%S_%f"
+        )
+
+        run_id: str = uuid4().hex[:8]
+        log_path = PATH_LOGS / f"{timestamp}_{run_id}_application.log"
+
+    formatter: logging.Formatter = logging.Formatter(
         "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    console_handler = logging.StreamHandler()
+    console_handler: logging.StreamHandler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
 
-    info_file_handler = logging.FileHandler(
-        PATH_LOGS / f"{current_time}_info.txt",
-        mode="w",
+    file_handler: logging.FileHandler = logging.FileHandler(
+        log_path,
+        mode="a",
         encoding="utf-8",
     )
-    info_file_handler.setLevel(logging.INFO)
-    info_file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
 
-    error_file_handler = logging.FileHandler(
-        PATH_LOGS / f"{current_time}_error.txt",
-        mode="w",
-        encoding="utf-8",
-    )
-    error_file_handler.setLevel(logging.ERROR)
-    error_file_handler.setFormatter(formatter)
-
-    listener = logging.handlers.QueueListener(
+    listener: logging.handlers.QueueListener = logging.handlers.QueueListener(
         log_queue,
         console_handler,
-        info_file_handler,
-        error_file_handler,
+        file_handler,
         respect_handler_level=True,
     )
 
-    # Logging des Hauptprozesses ebenfalls über die Queue
-    root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
     root_logger.handlers.clear()
-    root_logger.addHandler(
-        logging.handlers.QueueHandler(log_queue)
-    )
+    root_logger.addHandler(logging.handlers.QueueHandler(log_queue))
 
     listener.start()
-
     return listener
 
 
-def setup_worker_logging(log_queue: Queue):
+def setup_worker_logging(
+    log_queue: ProcessQueue[logging.LogRecord],
+) -> None:
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
 
     root_logger.handlers.clear()
 
-    root_logger.addHandler(
-        logging.handlers.QueueHandler(log_queue)
-    )
+    root_logger.addHandler(logging.handlers.QueueHandler(log_queue))

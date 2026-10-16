@@ -7,21 +7,21 @@ logger = logging.getLogger(__name__)
 
 
 class ProcessManager:
-
     def __init__(
-            self,
-            path_exe: Path,
+        self,
+        path_exe: Path,
     ) -> None:
         self.path_exe = path_exe
-        self.process: subprocess.Popen | None = None
+        self.process: subprocess.Popen[bytes] | None = None
         self.executable_name = path_exe.name
 
     def start_process(self) -> None:
         if self.is_running():
-            logger.exception(f"{self.path_exe.name} is already running.")
-            raise RuntimeError(
-                f"{self.path_exe.name} is already running."
+            logger.error(
+                "%s is already running.",
+                self.executable_name,
             )
+            raise RuntimeError(f"{self.executable_name} is already running.")
 
         try:
             self.process = subprocess.Popen([str(self.path_exe)])
@@ -29,7 +29,8 @@ class ProcessManager:
 
         except FileNotFoundError as exc:
             logger.exception(
-                f"{self.executable_name} not found. Please install it and try again."
+                "%s not found. Please install it and try again.",
+                self.executable_name,
             )
             raise FileNotFoundError(
                 f"{self.executable_name} not found. Please install it and try again."
@@ -37,81 +38,88 @@ class ProcessManager:
 
         except TimeoutError as exc:
             logger.exception(
-                f"{self.executable_name} was found, but did not start within the expected time."
+                "%s did not start within the expected time.",
+                self.executable_name,
             )
             raise TimeoutError(
-                f"{self.executable_name} was found, but did not start within the expected time."
+                f"{self.executable_name} did not start within the expected time."
             ) from exc
 
         except PermissionError as exc:
             logger.exception(
-                f"{self.executable_name} was found, but Python has no permission to start it."
+                "Python has no permission to start %s.",
+                self.executable_name,
             )
             raise PermissionError(
-                f"{self.executable_name} was found, but Python has no permission to start it."
+                f"Python has no permission to start {self.executable_name}."
             ) from exc
 
         except OSError as exc:
             logger.exception(
-                f"{self.executable_name} could not be started due to an operating system error."
+                "%s could not be started due to an operating system error.",
+                self.executable_name,
             )
             raise RuntimeError(
-                f"{self.executable_name} could not be started due to an operating system error."
+                f"{self.executable_name} could not be started "
+                "due to an operating system error."
             ) from exc
 
     def stop_process(self) -> None:
+        process: subprocess.Popen[bytes] | None = self.process
 
-        if self.process is None:
-            subprocess.run(
+        if process is None:
+            return
+
+        if process.poll() is None:
+            result: subprocess.CompletedProcess[str] = subprocess.run(
                 [
                     "taskkill",
                     "/F",
                     "/T",
-                    "/IM",
-                    self.executable_name,
+                    "/PID",
+                    str(process.pid),
                 ],
                 capture_output=True,
                 text=True,
+                check=False,
             )
-        else:
-            if self.process.poll() is None:
-                subprocess.run(
-                    [
-                        "taskkill",
-                        "/F",
-                        "/T",
-                        "/PID",
-                        str(self.process.pid),
-                    ],
-                    capture_output=True,
-                    text=True
+
+            if result.returncode != 0 and process.poll() is None:
+                details: str = result.stderr.strip() or result.stdout.strip()
+                raise RuntimeError(
+                    f"Could not stop process PID {process.pid}: {details}"
                 )
 
+        process.wait(timeout=10.0)
         self.process = None
 
-        time.sleep(2)
-
-    def is_running(self):
-
-        tasklist = subprocess.run(
-            ["tasklist"],
-            capture_output=True,
-            text=True
-        )
+    def is_running(self) -> bool:
+        tasklist = subprocess.run(["tasklist"], capture_output=True, text=True)
 
         if Path(self.executable_name).name.lower() in tasklist.stdout.lower():
             return True
         else:
             return False
 
-    def wait_until_running(self, executable_name, timeout_seconds: float = 30.0):
+    def wait_until_running(
+        self,
+        executable_name: str,
+        timeout_seconds: float = 30.0,
+    ) -> None:
+        deadline: float = time.monotonic() + timeout_seconds
 
-        end_time = time.time() + timeout_seconds
-
-        while time.time() < end_time:
+        while time.monotonic() < deadline:
             if self.is_running():
                 return
 
             time.sleep(0.5)
-        logger.exception(f"Process '{executable_name}' did not start within {timeout_seconds} seconds.")
-        raise TimeoutError(f"Process '{executable_name}' did not start within {timeout_seconds} seconds.")
+
+        logger.error(
+            "Process '%s' did not start within %s seconds.",
+            executable_name,
+            timeout_seconds,
+        )
+        raise TimeoutError(
+            f"Process '{executable_name}' did not start "
+            f"within {timeout_seconds} seconds."
+        )
