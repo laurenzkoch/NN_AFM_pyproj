@@ -7,6 +7,7 @@ class EventType(Enum):
     PROGRESS = "progress"
     FINISHED = "finished"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
     SIMULATION_STARTED = "simulation_started"
     SIMULATION_FINISHED = "simulation_finished"

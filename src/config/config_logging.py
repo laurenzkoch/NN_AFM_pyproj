@@ -42,22 +42,16 @@ def setup_main_logging(
 
     root_logger: logging.Logger = logging.getLogger()
 
-    # Die bereits durch configure_application_logging()
-    # eingerichtete Anwendungsdatei weiterverwenden.
-    log_path: Path | None = None
+    timestamp: str = datetime.now(ZoneInfo("Europe/Berlin")).strftime(
+        "%Y%m%d_%H%M%S_%f"
+    )
+    run_id: str = uuid4().hex[:8]
+    log_path: Path = PATH_LOGS / f"{timestamp}_{run_id}_application.log"
 
     for handler in root_logger.handlers:
         if isinstance(handler, logging.FileHandler):
             log_path = Path(handler.baseFilename)
             break
-
-    if log_path is None:
-        timestamp: str = datetime.now(ZoneInfo("Europe/Berlin")).strftime(
-            "%Y%m%d_%H%M%S_%f"
-        )
-
-        run_id: str = uuid4().hex[:8]
-        log_path = PATH_LOGS / f"{timestamp}_{run_id}_application.log"
 
     formatter: logging.Formatter = logging.Formatter(
         "%(asctime)s | %(levelname)s | %(name)s | %(message)s",

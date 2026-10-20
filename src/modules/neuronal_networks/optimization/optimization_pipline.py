@@ -23,6 +23,7 @@ class OptimizationPipline(MyPipeline):
         max_num_layers: int,
         neuron_step: int,
         n_trials: int,
+        num_kernel: int,
         learning_rate: float = 1e-3,
         patience: int = 50,
         num_epochs: int = 2000,
@@ -42,7 +43,7 @@ class OptimizationPipline(MyPipeline):
 
         super().__init__(
             service_name="Optimization",
-            num_kernel=1,
+            num_kernel=num_kernel,
         )
 
         try:
@@ -75,6 +76,7 @@ class OptimizationPipline(MyPipeline):
                 n_trials=n_trials,
                 seed=seed,
                 worker_timeout_seconds=worker_timeout_seconds,
+                cancellation=self.cancellation,
             )
         except BaseException:
             try:
@@ -116,6 +118,10 @@ class OptimizationPipline(MyPipeline):
             self.status_text = "Running"
 
         elif event.event_type == EventType.FINISHED:
+            self.status_text = event.text
+            finished = True
+
+        elif event.event_type == EventType.CANCELLED:
             self.status_text = event.text
             finished = True
 

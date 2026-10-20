@@ -21,8 +21,8 @@ from src.config.config_paths import (
 )
 from src.modules.data_managment.simulation_metadata import (
     build_simulation_metadata,
-    prepare_result_csv,
 )
+from src.modules.Pipeline_and_GUI.cancellation import CancellationToken
 from src.modules.Pipeline_and_GUI.events import EventType, PipelineEvent
 from src.modules.Pipeline_and_GUI.pipeline import MyPipeline
 from src.modules.process.eduvpn import EDUVPNProcessor
@@ -50,6 +50,7 @@ class SimulationSeries:
         num_workers: int,
         progress_queue: ProcessQueue[PipelineEvent],
         log_queue: ProcessQueue[logging.LogRecord],
+        cancellation: CancellationToken | None = None,
     ) -> None:
         self.jobs: tuple[SimulationJob, ...] = jobs
         self.gen_type: str = gen_type
@@ -57,17 +58,16 @@ class SimulationSeries:
 
         self.progress_queue: ProcessQueue[PipelineEvent] = progress_queue
         self.log_queue: ProcessQueue[logging.LogRecord] = log_queue
+        self.cancellation: CancellationToken = (
+            cancellation if cancellation is not None else CancellationToken()
+        )
 
         self._prepared: bool = False
         self.temp_root: Path | None = None
 
     def prepare_output(self) -> None:
         self._prepared = False
-        metadata = build_simulation_metadata()
-
-        for job in self.jobs:
-            prepare_result_csv(job.csv_path, metadata)
-
+        build_simulation_metadata()
         self._prepared = True
 
     def run(self) -> None:
@@ -75,6 +75,7 @@ class SimulationSeries:
             raise RuntimeError("The results files have not been prepared.")
 
         for index, job in enumerate(self.jobs, start=1):
+            self.cancellation.raise_if_requested()
             self.progress_queue.put(
                 PipelineEvent(
                     event_type=EventType.SIMULATION_STARTED,
@@ -100,15 +101,21 @@ class SimulationSeries:
                 csv_path=job.csv_path,
                 num_workers=workers,
                 temp_root=self.temp_root,
+                cancellation=self.cancellation,
             )
 
+            self.cancellation.raise_if_requested()
             simulation.prepare_output()
+
+            self.cancellation.raise_if_requested()
             simulation.run()
+
+            self.cancellation.raise_if_requested()
 
             self.progress_queue.put(
                 PipelineEvent(
                     event_type=EventType.SIMULATION_FINISHED,
-                    text=f"Kombination {index} abgeschlossen",
+                    text=f"Combination {index} completed",
                     combination_index=index,
                 )
             )
@@ -164,6 +171,7 @@ class SimulationPipeline(MyPipeline):
             num_workers=self.num_workers,
             progress_queue=self.progress_queue,
             log_queue=self.log_queue,
+            cancellation=self.cancellation,
         )
 
     def run(self) -> None:
@@ -376,8 +384,24 @@ class SimulationPipeline(MyPipeline):
                 self.existing_points += event.increment
             elif event.outcome == "copied":
                 self.copied_points += event.increment
+            self.status_text = (
+                f"simulated points: {self.simulated_points}\n"
+                f"dropped points: {self.dropped_points}\n"
+                f"existing points: {self.existing_points}\n"
+                f"copied points: {self.copied_points}"
+            )
 
         elif event.event_type == EventType.FINISHED:
+            self.status_text = (
+                f"{event.text}\n"
+                f"simulated points: {self.simulated_points}\n"
+                f"dropped points: {self.dropped_points}\n"
+                f"existing points: {self.existing_points}\n"
+                f"copied points: {self.copied_points}"
+            )
+            finished = True
+
+        elif event.event_type == EventType.CANCELLED:
             self.status_text = event.text
             finished = True
 

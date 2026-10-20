@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Generator, Iterable
-from concurrent.futures import Future, ProcessPoolExecutor, as_completed
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    Future,
+    ProcessPoolExecutor,
+    wait,
+)
 from dataclasses import dataclass
 from itertools import batched
 from multiprocessing.queues import Queue as ProcessQueue
@@ -20,6 +25,10 @@ from src.modules.data_managment.simulation_metadata import (
     is_compatible_metadata,
     prepare_result_csv,
     read_metadata,
+)
+from src.modules.Pipeline_and_GUI.cancellation import (
+    CancellationToken,
+    PipelineCancelledError,
 )
 from src.modules.Pipeline_and_GUI.events import EventType, PipelineEvent
 from src.modules.process.motor_cad_processes import mcad_instance_handling
@@ -63,12 +72,6 @@ def _execute_simulation(
 
             mcad.set_value_in_mcad(name, value)
 
-        logger.info(
-            "Winding: offset=%s coils=%s",
-            mcad.get_value_from_mcad("MagWindingOffset"),
-            mcad.get_value_from_mcad("NumberOfCoils"),
-        )
-
         return mcad.execute_mcad_simulation()
 
     except BaseException:
@@ -89,6 +92,7 @@ class MCADSimulation:
         csv_path: Path,
         num_workers: int,
         temp_root: Path | None = None,
+        cancellation: CancellationToken | None = None,
     ) -> None:
         self.point_generator = point_generator
         self.batch_size = batch_size
@@ -97,6 +101,9 @@ class MCADSimulation:
         self.csv_path = csv_path
         self.num_workers = num_workers
         self.temp_root: Path | None = temp_root
+        self.cancellation: CancellationToken = (
+            cancellation if cancellation is not None else CancellationToken()
+        )
 
         self.expected_metadata = build_simulation_metadata()
         self.dataframes: dict[str, pd.DataFrame] = self._get_csv_files()
@@ -111,11 +118,18 @@ class MCADSimulation:
 
     def run(self) -> None:
         try:
-            for batch in batched(
-                self.point_generator,
-                self.batch_size,
-            ):
+            self.cancellation.raise_if_requested()
+
+            for batch in batched(self.point_generator, self.batch_size):
+                self.cancellation.raise_if_requested()
                 self._run_simulation_pool(batch)
+
+            self.cancellation.raise_if_requested()
+
+        except PipelineCancelledError:
+            logger.info("Simulation cancelled: %s", self.csv_path.name)
+            raise
+
         except Exception:
             logger.exception("An error occurred during simulation.")
             raise
@@ -185,7 +199,7 @@ class MCADSimulation:
     def _find_known_result(
         self,
         parameters: dict[str, float],
-    ) -> tuple[str, int | float] | None:
+    ) -> tuple[str, int] | None:
         schema = tuple(parameters)
         target = np.asarray(tuple(parameters.values()), dtype=float)
         if not np.isfinite(target).all():
@@ -198,7 +212,7 @@ class MCADSimulation:
             for record in sorted(known[source], key=lambda row: row[0]):
                 candidate = np.asarray(record[1:], dtype=float)
                 if np.all(np.abs(candidate - target) <= 1e-4):
-                    return source, record[0]
+                    return source, int(record[0])
         return None
 
     def _append_result(self, values_row: list[float]) -> None:
@@ -243,6 +257,7 @@ class MCADSimulation:
         requests: list[PendingRequest],
     ) -> None:
         for parameters in batch:
+            self.cancellation.raise_if_requested()
             known = self._find_known_result(parameters)
 
             if known is not None:
@@ -290,46 +305,70 @@ class MCADSimulation:
             )
 
     def _collect_results(self, requests: list[PendingRequest]) -> None:
-        by_future = {request.future: request for request in requests}
+        pending: dict[
+            Future[tuple[list[float] | None, bool]],
+            PendingRequest,
+        ] = {request.future: request for request in requests}
 
-        for future in as_completed(by_future):
-            request = by_future[future]
-            row, succeeded = future.result()
+        while pending:
+            self.cancellation.raise_if_requested()
 
-            if not succeeded:
-                self._report_progress("dropped", request.count)
-                continue
+            completed, _ = wait(
+                pending,
+                timeout=0.1,
+                return_when=FIRST_COMPLETED,
+            )
 
-            if row is None:
-                raise RuntimeError(
-                    "The simulation was successful but did not produce any results."
-                )
+            self.cancellation.raise_if_requested()
 
-            self._append_result(row)
-            self._report_progress("simulated", request.count)
+            for future in completed:
+                self.cancellation.raise_if_requested()
+
+                request: PendingRequest = pending.pop(future)
+                row, succeeded = future.result()
+
+                if not succeeded:
+                    self._report_progress("dropped", request.count)
+                    continue
+
+                if row is None:
+                    raise RuntimeError(
+                        "The simulation was successful but did not produce any results."
+                    )
+
+                self.cancellation.raise_if_requested()
+                self._append_result(row)
+                self._report_progress("simulated", request.count)
 
     def _run_simulation_pool(
         self,
         batch_machine_generator_instance: Iterable[dict[str, float]],
     ) -> None:
+        self.cancellation.raise_if_requested()
+
         requests: list[PendingRequest] = []
 
-        with ProcessPoolExecutor(
+        executor: ProcessPoolExecutor = ProcessPoolExecutor(
             max_workers=self.num_workers,
             initializer=mcad_instance_handling.init_mcad_instance,
             initargs=(self.log_queue, self.temp_root),
-        ) as executor:
-            try:
-                self._submit_batch(
-                    executor,
-                    batch_machine_generator_instance,
-                    requests,
-                )
-                self._collect_results(requests)
+        )
 
-            except Exception:
-                for request in requests:
-                    request.future.cancel()
+        try:
+            self._submit_batch(
+                executor,
+                batch_machine_generator_instance,
+                requests,
+            )
+            self._collect_results(requests)
+            self.cancellation.raise_if_requested()
 
-                logger.exception("Simulation batch failed")
-                raise
+        except BaseException:
+            for request in requests:
+                request.future.cancel()
+
+            executor.kill_workers()
+            raise
+
+        else:
+            executor.shutdown(wait=True)

@@ -151,7 +151,11 @@ def test_boundary_conditions(parameter_list: list[str], values: list[float]) -> 
 class MCADProcessor:
     def __init__(self) -> None:
         pymotorcad.set_motorcad_exe(str(PATH_MCAD_EXE))
-        self.mcad_process: pymotorcad.MotorCAD = pymotorcad.MotorCAD()
+        self.mcad_process: pymotorcad.MotorCAD = pymotorcad.MotorCAD(
+            open_new_instance=True,
+            reuse_parallel_instances=False,
+            keep_instance_open=False,
+        )
 
     def __enter__(self) -> Self:
         self.start()

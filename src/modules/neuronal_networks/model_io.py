@@ -117,7 +117,8 @@ def load_bundle(
     if not isinstance(raw, dict):
         raise ValueError("The model bundle must contain a dictionary.")
 
-    missing_fields: set[str] = set(SurrogateCheckpoint.__required_keys__) - set(raw)
+    required_fields: set[str] = set(SurrogateCheckpoint.__annotations__)
+    missing_fields: set[str] = required_fields.difference(raw)
 
     if missing_fields:
         raise ValueError(f"Missing checkpoint fields: {sorted(missing_fields)}")
@@ -141,7 +142,7 @@ def load_bundle(
             "from the current project configuration."
         )
     for key in ("target_minimum", "target_denominator"):
-        value: object = checkpoint.get(key)
+        value: object = raw.get(key)
 
         if not isinstance(value, Tensor):
             raise ValueError(f"'{key}' must be a tensor.")

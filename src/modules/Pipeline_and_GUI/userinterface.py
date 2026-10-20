@@ -1,4 +1,5 @@
 import tkinter as tk
+from collections.abc import Callable
 from tkinter import ttk
 from types import TracebackType
 
@@ -11,7 +12,9 @@ class MyUserInterface:
         title: str = "Progress Monitoring",
         geometry: str = "450x350",
         overall_max_value: int | None = None,
+        on_cancel: Callable[[], None] | None = None,
     ) -> None:
+        self._on_cancel: Callable[[], None] | None = on_cancel
         self.root = tk.Tk()
 
         self.root.title(process_name)
@@ -111,12 +114,20 @@ class MyUserInterface:
         self.root.mainloop()
 
     def on_close(self) -> None:
+        if self.close_requested:
+            return
+
         self.close_requested = True
+
         if self.service_finished:
             self.root.quit()
-        else:
-            # Keep Tk's event loop alive while background work finishes.
-            self.root.withdraw()
+            return
+
+        if self._on_cancel is not None:
+            self._on_cancel()
+
+        # Ereignisschleife während der Workerbereinigung weiterlaufen lassen.
+        self.root.withdraw()
 
     def mark_finished(self) -> None:
         self.service_finished = True

@@ -9,6 +9,10 @@ from threading import Lock, Thread
 from typing import Protocol
 
 from src.config.config_logging import setup_main_logging
+from src.modules.Pipeline_and_GUI.cancellation import (
+    CancellationToken,
+    PipelineCancelledError,
+)
 from src.modules.Pipeline_and_GUI.events import EventType, PipelineEvent
 from src.modules.Pipeline_and_GUI.userinterface import MyUserInterface
 from src.modules.process.resources import determine_number_of_kernels
@@ -28,6 +32,7 @@ class MyPipeline:
     ) -> None:
         self._used = False
         self._start_lock = Lock()
+        self.cancellation: CancellationToken = CancellationToken()
 
         self.service_name: str = service_name
 
@@ -98,7 +103,18 @@ class MyPipeline:
         )
 
         try:
+            self.cancellation.raise_if_requested()
             self.service.run()
+            self.cancellation.raise_if_requested()
+        except PipelineCancelledError as exc:
+            self.service_exception = exc
+            logger.info("Pipeline cancelled: %s", self.service_name)
+            self.progress_queue.put(
+                PipelineEvent(
+                    event_type=EventType.CANCELLED,
+                    text=f"{self.service_name} cancelled",
+                )
+            )
         except BaseException as exc:
             self.service_exception = exc
             self.progress_queue.put(
@@ -122,11 +138,19 @@ class MyPipeline:
             daemon=False,
         )
 
+    def request_cancel(self) -> None:
+        if self.cancellation.is_requested():
+            return
+
+        self.cancellation.request()
+        logger.info("Cancellation requested for pipeline: %s", self.service_name)
+
     def _initialize_ui(self, title: str) -> MyUserInterface:
         return MyUserInterface(
             max_value=self.max_progress_steps,
             title=title,
             overall_max_value=self.overall_max_value,
+            on_cancel=self.request_cancel,
         )
 
     def _wait_for_thread(self) -> None:

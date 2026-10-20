@@ -19,13 +19,13 @@ def _checked_pairs(
     y_pred: Tensor,
 ) -> tuple[Tensor, Tensor]:
     if y_true.shape != y_pred.shape:
-        raise ValueError("Prediction/reference shapes differ")
+        raise ValueError("Prediction/map_reference_validation shapes differ")
     if y_true.ndim < 2 or y_true.numel() == 0:
         raise ValueError("Expected nonempty data with a channel axis")
     if not torch.isfinite(y_true).all():
-        raise ValueError("Nonfinite reference")
+        raise ValueError("Nonfinite map_reference_validation")
     if not torch.isfinite(y_pred).all():
-        raise ValueError("Nonfinite prediction")
+        raise ValueError("Nonfinite map_prediction_validation")
     return (
         y_true.reshape(-1, y_true.shape[-1]).double(),
         y_pred.reshape(-1, y_pred.shape[-1]).double(),
@@ -36,11 +36,15 @@ def calc_r_squared_report(y_true: Tensor, y_pred: Tensor) -> R2Report:
     reference, prediction = _checked_pairs(y_true, y_pred)
     residual = ((reference - prediction) ** 2).sum(dim=0)
     total = ((reference - reference.mean(dim=0)) ** 2).sum(dim=0)
-    values = tuple(
-        None if total[c].item() == 0 else (1 - residual[c] / total[c]).item()
+    values: tuple[float | None, ...] = tuple(
+        None if total[c].item() == 0 else float((1 - residual[c] / total[c]).item())
         for c in range(reference.shape[1])
     )
-    defined_values: list[float] = [value for value in values if value is not None]
+
+    defined_values: list[float] = []
+    for value in values:
+        if value is not None:
+            defined_values.append(value)
 
     mean: float | None = (
         sum(defined_values) / len(values)
@@ -53,7 +57,9 @@ def calc_r_squared_report(y_true: Tensor, y_pred: Tensor) -> R2Report:
 def calc_r_squared(y_true: Tensor, y_pred: Tensor) -> float:
     report = calc_r_squared_report(y_true, y_pred)
     if report.mean is None:
-        raise ValueError("Overall R2 undefined: constant reference channel")
+        raise ValueError(
+            "Overall R2 undefined: constant map_reference_validation channel"
+        )
     return report.mean
 
 

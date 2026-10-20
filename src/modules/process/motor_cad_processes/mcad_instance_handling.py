@@ -10,6 +10,7 @@ from src.config.config_logging import setup_worker_logging
 from src.config.config_paths import PATH_MCAD_BASEFILE
 from src.modules.data_managment.temp_files import create_temp_file_copy
 from src.modules.process.motor_cad_processes.mcad_processing import MCADProcessor
+from src.modules.process.worker_job import protect_worker_process_tree
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ def init_mcad_instance(
     global _mcad_instance
 
     setup_worker_logging(log_queue)
+    protect_worker_process_tree()
     logger.info("Initializing MCAD instance in worker PID %s", os.getpid())
 
     Finalize(
@@ -34,10 +36,12 @@ def init_mcad_instance(
     if _mcad_instance is None:
         _mcad_instance = MCADProcessor()
 
+    instance: MCADProcessor = get_mcad_instance()
+
     try:
-        _mcad_instance.start()
+        instance.start()
         open_mcad_file(
-            _mcad_instance,
+            instance,
             temp_root=temp_root,
         )
     except BaseException:

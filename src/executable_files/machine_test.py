@@ -18,7 +18,6 @@ def main() -> None:
     total_points: int = 0
 
     for num_base_designs, num_lam_designs in combinations:
-        # Punktzahl für Generator v2.
         point_count: int = num_base_designs * num_lam_designs * math.prod(MAP_SIZE)
         total_points += point_count
 

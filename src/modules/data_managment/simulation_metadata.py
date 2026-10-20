@@ -2,6 +2,7 @@ import csv
 import json
 import os
 import tempfile
+from copy import deepcopy
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
@@ -30,7 +31,6 @@ class SimulationPayload(TypedDict):
     external_dependency_hashes: dict[str, str]
     csv_columns: list[str]
     float_decimal_places: int
-    implementation_hashes: dict[str, str]
 
 
 class LegacyAdoption(TypedDict):
@@ -47,45 +47,37 @@ class SimulationMetadata(TypedDict):
     adoption: NotRequired[LegacyAdoption]
 
 
-# Geprüfte Kompatibilität: bisheriger Stand -> bereinigter Stand.
-# Simulationsberechnungen und Grenzwerte sind unverändert.
-REVIEWED_COMPATIBLE_FINGERPRINTS: frozenset[tuple[str, str]] = frozenset(
-    {
-        (
-            "d5afb8f38a099348f12039cf19c2f595542e3aa1d66c12e88d3421d15909de97",
-            "46035f0aa47c3fcb0b0399c8e168af99bff776f3d572081d5f97ebd8abe77a61",
-        ),
+def _copy_simulation_payload(
+    payload: SimulationPayload,
+) -> SimulationPayload:
+    return {
+        "metadata_version": payload["metadata_version"],
+        "base_model_sha256": payload["base_model_sha256"],
+        "mcad_executable_sha256": payload["mcad_executable_sha256"],
+        "integration_version": payload["integration_version"],
+        "external_dependency_revision": payload["external_dependency_revision"],
+        "external_dependency_hashes": dict(payload["external_dependency_hashes"]),
+        "csv_columns": list(payload["csv_columns"]),
+        "float_decimal_places": payload["float_decimal_places"],
     }
-)
 
 
 def is_compatible_metadata(
     actual: SimulationMetadata,
     expected: SimulationMetadata,
 ) -> bool:
-    if actual["fingerprint"] == expected["fingerprint"]:
-        return True
-
-    fingerprint_pair: tuple[str, str] = (
-        actual["fingerprint"],
-        expected["fingerprint"],
-    )
-
-    if fingerprint_pair not in REVIEWED_COMPATIBLE_FINGERPRINTS:
+    if (
+        actual["payload"].get("metadata_version") != 2
+        or expected["payload"].get("metadata_version") != 2
+    ):
         return False
 
-    actual_setup: dict[str, object] = {
-        key: value
-        for key, value in actual["payload"].items()
-        if key != "implementation_hashes"
-    }
-    expected_setup: dict[str, object] = {
-        key: value
-        for key, value in expected["payload"].items()
-        if key != "implementation_hashes"
-    }
+    if actual["payload"] != expected["payload"]:
+        return False
 
-    return actual_setup == expected_setup
+    calculated_fingerprint: str = canonical_hash(expected["payload"])
+
+    return actual["fingerprint"] == expected["fingerprint"] == calculated_fingerprint
 
 
 def metadata_path(csv_path: str | Path) -> Path:
@@ -94,16 +86,8 @@ def metadata_path(csv_path: str | Path) -> Path:
 
 
 def build_simulation_metadata() -> SimulationMetadata:
-    root = Path(__file__).resolve().parents[3]
-    implementation: tuple[str, ...] = (
-        "src/config/config_mcad_parameters.py",
-        "src/modules/process/motor_cad_processes/mcad_processing.py",
-        "src/modules/simulation/simulation.py",
-        "src/modules/simulation/generators/machine_generator.py",
-        "src/modules/simulation/generators/map_generator.py",
-    )
     payload: SimulationPayload = {
-        "metadata_version": 1,
+        "metadata_version": 2,
         "base_model_sha256": file_sha256(PATH_MCAD_BASEFILE),
         "mcad_executable_sha256": file_sha256(PATH_MCAD_EXE),
         "integration_version": version("ansys-motorcad-core"),
@@ -114,11 +98,12 @@ def build_simulation_metadata() -> SimulationMetadata:
         },
         "csv_columns": list(CSV_PARAMETERS),
         "float_decimal_places": 4,
-        "implementation_hashes": {
-            name: file_sha256(root / name) for name in implementation
-        },
     }
-    return {"fingerprint": canonical_hash(payload), "payload": payload}
+
+    return {
+        "fingerprint": canonical_hash(payload),
+        "payload": payload,
+    }
 
 
 def validate_result_csv(csv_path: Path) -> pd.DataFrame:
@@ -189,20 +174,20 @@ def write_metadata(
     csv_path: Path,
     document: SimulationMetadata,
 ) -> None:
-    destination = metadata_path(csv_path)
-    temporary: Path | None = None
+    destination: Path = metadata_path(csv_path)
+
+    stream = tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=destination.parent,
+        prefix="metadata_",
+        suffix=".tmp",
+        delete=False,
+    )
+    temporary: Path = Path(stream.name)
 
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=destination.parent,
-            prefix="metadata_",
-            suffix=".tmp",
-            delete=False,
-        ) as stream:
-            temporary = Path(stream.name)
-
+        with stream:
             json.dump(
                 document,
                 stream,
@@ -213,10 +198,8 @@ def write_metadata(
             )
 
         os.replace(temporary, destination)
-
     finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+        temporary.unlink(missing_ok=True)
 
 
 def prepare_result_csv(
@@ -286,7 +269,7 @@ def adopt_legacy_csv(
 
     document: SimulationMetadata = {
         "fingerprint": expected["fingerprint"],
-        "payload": expected["payload"].copy(),
+        "payload": _copy_simulation_payload(expected["payload"]),
         "adoption": {
             "kind": "legacy_assumption",
             "reason": reason.strip(),
@@ -300,3 +283,68 @@ def adopt_legacy_csv(
         write_metadata(csv_path, document)
 
     return document
+
+
+def migrate_simulation_metadata(
+    csv_path: Path,
+    expected: SimulationMetadata,
+    *,
+    write: bool = False,
+) -> SimulationMetadata:
+    if (
+        not is_compatible_metadata(expected, expected)
+        or "implementation_hashes" in expected["payload"]
+    ):
+        raise ValueError("Expected metadata must use the new version 2 format.")
+
+    sidecar: Path = metadata_path(csv_path)
+    original_sidecar: bytes = sidecar.read_bytes()
+    original_csv_hash: str = file_sha256(csv_path)
+
+    # Prüft den bisherigen Fingerprint und bei adoptierten Dateien
+    # zusätzlich den bereits gespeicherten CSV-Hash.
+    actual: SimulationMetadata = read_metadata(csv_path)
+
+    # Prüft Spaltenreihenfolge und endliche Ergebniswerte.
+    validate_result_csv(csv_path)
+
+    previous_version: object = actual["payload"].get("metadata_version")
+
+    if type(previous_version) is not int or previous_version not in (1, 2):
+        raise ValueError("Unsupported metadata version.")
+
+    previous_setup: dict[str, object] = {
+        key: value for key, value in actual["payload"].items()
+    }
+
+    if previous_version == 1:
+        implementation_hashes: object = previous_setup.pop(
+            "implementation_hashes",
+            None,
+        )
+
+        if not isinstance(implementation_hashes, dict):
+            raise ValueError("Version 1 implementation hashes are missing.")
+
+        previous_setup["metadata_version"] = 2
+
+    if previous_setup != expected["payload"]:
+        raise ValueError(
+            "Simulation setup differs from the current setup. "
+            "Metadata was not migrated."
+        )
+
+    migrated: SimulationMetadata = deepcopy(actual)
+    migrated["payload"] = _copy_simulation_payload(expected["payload"])
+    migrated["fingerprint"] = expected["fingerprint"]
+
+    if file_sha256(csv_path) != original_csv_hash:
+        raise ValueError("CSV changed during migration.")
+
+    if sidecar.read_bytes() != original_sidecar:
+        raise ValueError("Metadata changed during migration.")
+
+    if write and migrated != actual:
+        write_metadata(csv_path, migrated)
+
+    return migrated

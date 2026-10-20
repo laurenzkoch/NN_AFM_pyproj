@@ -147,7 +147,7 @@ class NNTrainer:
         if target.shape != prediction.shape:
             raise ValueError(
                 "Prediction and target shapes must match: "
-                f"prediction={tuple(prediction.shape)}, "
+                f"map_prediction_validation={tuple(prediction.shape)}, "
                 f"target={tuple(target.shape)}."
             )
 
@@ -245,11 +245,6 @@ class NNTrainer:
             self._train()
             validation_loss = self._validation()
             if self._early_stopping(validation_loss):
-                logger.info(
-                    "Early stopping after %d epochs; best validation loss: %.6g",
-                    epoch + 1,
-                    self.best_validation_loss,
-                )
                 break
         if self.best_model_state is not None:
             self.neuronal_network.load_state_dict(self.best_model_state)

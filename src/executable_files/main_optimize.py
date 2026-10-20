@@ -1,4 +1,5 @@
 import argparse
+import json
 import logging
 import random
 from datetime import datetime
@@ -10,9 +11,14 @@ import numpy as np
 import optuna
 import torch
 
+from src.modules.plotting.prediction_report import create_prediction_report
 from src.config.config_logging import configure_application_logging
 from src.config.config_mcad_parameters import MACHINE_DEFINITION, MAP_SIZE
-from src.config.config_paths import PATH_DATA_TRAINED_NN
+from src.config.config_paths import (
+    PATH_DATA_TRAINED_NN,
+    PATH_TRAINING_DATA,
+)
+from src.modules.neuronal_networks.evaluation_io import save_evaluation
 from src.modules.neuronal_networks.model_io import (
     JSONValue,
     load_bundle,
@@ -25,13 +31,13 @@ from src.modules.neuronal_networks.optimization.optimization_pipline import (
 )
 from src.modules.neuronal_networks.surrogate_model import SurrogateModelTrainer
 from src.modules.neuronal_networks.testing import evaluate_surrogate
+from src.modules.plotting.prediction_results import plot_prediction_results
 
 logger = logging.getLogger(__name__)
 
 
 class OptimizationArguments(argparse.Namespace):
     csv: str
-    test_csv: list[str]
     seed: int
     trials: int
     worker_timeout: float | None
@@ -47,9 +53,8 @@ class TrainingConfig(TypedDict):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--csv", required=True)
-    parser.add_argument("--test-csv", action="append", default=[])
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--trials", type=int, default=100)
+    parser.add_argument("--trials", type=int, default=1000)
     parser.add_argument("--worker-timeout", type=float, default=None)
     args: OptimizationArguments = OptimizationArguments()
     parser.parse_args(namespace=args)
@@ -58,19 +63,37 @@ def main() -> None:
     optuna.logging.disable_default_handler()
     optuna.logging.enable_propagation()
 
+    training_csv_path: Path = (PATH_TRAINING_DATA / args.csv).resolve()
+
+    test_filenames: tuple[str, ...] = tuple(
+        path.name
+        for path in sorted(PATH_TRAINING_DATA.iterdir())
+        if path.is_file()
+        and path.suffix.lower() == ".csv"
+        and path.resolve() != training_csv_path
+    )
+
+    logger.info("Training/validation source: %s", args.csv)
+    logger.info(
+        "Automatically selected test sources (%d): %s",
+        len(test_filenames),
+        ", ".join(test_filenames) or "none",
+    )
+
     training: TrainingConfig = {
         "learning_rate": 1e-3,
         "weight_decay": 1e-3,
         "num_epochs": 2000,
-        "patience": 50,
+        "patience": 100,
     }
     pipeline = OptimizationPipline(
         csv_file=args.csv,
-        test_filenames=tuple(args.test_csv),
+        test_filenames=test_filenames,
         max_num_neuron_per_layer=200,
         max_num_layers=3,
         neuron_step=5,
         n_trials=args.trials,
+        num_kernel=4,
         seed=args.seed,
         worker_timeout_seconds=args.worker_timeout,
         **training,
@@ -120,8 +143,27 @@ def main() -> None:
         final_model.get_prediction(data.validation.geometry_tensor),
         loaded.get_prediction(data.validation.geometry_tensor),
     )
+    evaluation_path: Path = save_evaluation(
+        model_path=model_path,
+        model=loaded,
+        data=data,
+    )
+
+    plot_path: Path = plot_prediction_results(run_name)
+    create_prediction_report(run_name)
+
+    logger.info("Evaluation data saved: %s", evaluation_path)
     logger.info("Model saved: %s", model_path)
-    logger.info("Metrics: %s", metrics)
+    logger.info("Plots saved: %s", plot_path)
+    logger.info(
+        "Metrics:\n%s",
+        json.dumps(
+            metrics,
+            indent=4,
+            ensure_ascii=False,
+            allow_nan=False,
+        ),
+    )
 
 
 if __name__ == "__main__":

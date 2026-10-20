@@ -32,6 +32,7 @@ from src.modules.neuronal_networks.nn_training_torch import NNTrainer
 from src.modules.neuronal_networks.NN_types.mlp_with_torch import MLP
 from src.modules.neuronal_networks.surrogate_model import SurrogateModelTrainer
 from src.modules.neuronal_networks.testing import calc_mse, calc_r_squared_report
+from src.modules.Pipeline_and_GUI.cancellation import CancellationToken
 from src.modules.Pipeline_and_GUI.events import EventType, PipelineEvent
 
 logger = logging.getLogger(__name__)
@@ -127,6 +128,7 @@ class NNOptimizer:
         seed: int = 42,
         worker_timeout_seconds: float | None = None,
         log_queue: ProcessQueue[logging.LogRecord] | None = None,
+        cancellation: CancellationToken | None = None,
     ) -> None:
         validate_search_settings(
             max_num_layers,
@@ -146,6 +148,9 @@ class NNOptimizer:
         self.data: TrainValidationTestDataTensors = data
         self.progress_queue: ProcessQueue[PipelineEvent] = progress_queue
         self.log_queue: ProcessQueue[logging.LogRecord] | None = log_queue
+        self.cancellation: CancellationToken = (
+            cancellation if cancellation is not None else CancellationToken()
+        )
         self.trainer = trainer
         self.max_num_layers = max_num_layers
         self.max_num_neurons_per_layer = max_num_neurons_per_layer
@@ -157,18 +162,32 @@ class NNOptimizer:
         self.result: OptimizationResult | None = None
         self.experiment_config = self._experiment_config()
         self.fingerprint = canonical_hash(self.experiment_config)
-        self.study_name = "layer_" + self.fingerprint
+        self.study_name = self.fingerprint
         self.experiment_dir = PATH_DATA / "optimization" / self.fingerprint
         self.experiment_dir.mkdir(parents=True, exist_ok=True)
         database = (self.experiment_dir / "study.sqlite3").resolve().as_posix()
         self.storage = "sqlite:///" + database
 
     def run(self) -> None:
+        self.cancellation.raise_if_requested()
         self._prepare_study()
+
+        self.cancellation.raise_if_requested()
         self._run_workers()
+
+        self.cancellation.raise_if_requested()
 
         study = optuna.load_study(study_name=self.study_name, storage=self.storage)
         best_trial = study.best_trial
+        best_value: float | None = best_trial.value
+
+        if best_value is None:
+            raise ValueError("The best trial has no objective value.")
+
+        best_mse: float = float(best_value)
+
+        if not np.isfinite(best_mse):
+            raise ValueError("The best trial has a non-finite objective value.")
 
         hidden_layers = tuple(
             best_trial.params[f"neurons_{i}"]
@@ -177,7 +196,7 @@ class NNOptimizer:
 
         self.result = OptimizationResult(
             hidden_layers=hidden_layers,
-            mse=float(best_trial.value),
+            mse=best_mse,
             r_squared=best_trial.user_attrs.get("r2_mean"),
             trial_number=best_trial.number,
         )
@@ -265,6 +284,8 @@ class NNOptimizer:
 
         try:
             for index in range(self.num_workers):
+                self.cancellation.raise_if_requested()
+
                 process = Process(
                     target=_optuna_worker,
                     args=(
@@ -287,7 +308,10 @@ class NNOptimizer:
                 process.start()
 
             while True:
+                self.cancellation.raise_if_requested()
+
                 for process in processes:
+                    self.cancellation.raise_if_requested()
                     process.join(timeout=0.1)
                     if process.exitcode not in (None, 0):
                         raise RuntimeError(

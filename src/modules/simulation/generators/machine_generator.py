@@ -1,8 +1,9 @@
 import math
 from collections.abc import Generator
-from typing import Any
+from typing import Any, Literal, Protocol, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy.optimize import linear_sum_assignment
 from scipy.stats import qmc
 
@@ -22,6 +23,16 @@ from src.config.config_mcad_parameters import (
     STATOR_BORE,
 )
 from src.modules.simulation.generators.map_generator import map_generator
+
+
+class _LegacyLatinHypercubeFactory(Protocol):
+    def __call__(
+        self,
+        *,
+        d: int,
+        optimization: Literal["random-cd"],
+        seed: int,
+    ) -> qmc.LatinHypercube: ...
 
 
 class AFMMachineGenerator:
@@ -89,7 +100,11 @@ class AFMMachineGenerator:
             (targets[:, None, :] - normalized_pairs[None, :, :]) ** 2,
             axis=2,
         )
-        _, selected_indices = linear_sum_assignment(squared_distances)
+        assignment: tuple[NDArray[np.intp], NDArray[np.intp]] = cast(
+            tuple[NDArray[np.intp], NDArray[np.intp]],
+            linear_sum_assignment(squared_distances),
+        )
+        _, selected_indices = assignment
         return pairs[selected_indices]
 
     @staticmethod
@@ -100,9 +115,17 @@ class AFMMachineGenerator:
         upper_bounds: np.ndarray,
         seed: int,
     ) -> np.ndarray:
-        samples = qmc.LatinHypercube(d=d, optimization="random-cd", seed=seed).random(
-            n=num_of_points
+        factory: _LegacyLatinHypercubeFactory = cast(
+            _LegacyLatinHypercubeFactory,
+            cast(object, qmc.LatinHypercube),
         )
+
+        sampler: qmc.LatinHypercube = factory(
+            d=d,
+            optimization="random-cd",
+            seed=seed,
+        )
+        samples: NDArray[np.float64] = sampler.random(n=num_of_points)
 
         return qmc.scale(samples, lower_bounds, upper_bounds)
 

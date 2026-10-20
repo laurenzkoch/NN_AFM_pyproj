@@ -5,10 +5,10 @@ from src.modules.simulation.sim_pipeline import SimulationPipeline
 def main() -> None:
     configure_application_logging()
 
-    combinations: list[tuple[int, int]] = [
-        (1, 2),
-        (1, 3),
-    ]
+    combinations: list[tuple[int, int]] = []
+    for i in [1, 5, 10, 15]:
+        for j in range(10, 300, 10):
+            combinations.append((i, j))
 
     pipeline = SimulationPipeline(
         design_combinations=combinations,
