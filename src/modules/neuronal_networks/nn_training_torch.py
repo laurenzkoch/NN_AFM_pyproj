@@ -1,6 +1,7 @@
 import copy
 import logging
 import math
+import time
 
 import torch
 
@@ -63,6 +64,8 @@ class NNTrainer:
         self.neuronal_network: MLP | Conv3dAutoencoder
         self.trained_autoencoder: Conv3dAutoencoder | None
 
+        self.training_duration_seconds: float | None = None
+
     def start(
         self,
         neuronal_network: MLP | Conv3dAutoencoder,
@@ -102,7 +105,17 @@ class NNTrainer:
         self.best_model_state = None
         self.epochs_without_improvement = 0
 
-        return self._training_process()
+        self.training_duration_seconds = None
+        self.neuronal_network.training_duration_seconds = None
+
+        started_at: float = time.perf_counter()
+        trained_network: MLP | Conv3dAutoencoder = self._training_process()
+        duration: float = time.perf_counter() - started_at
+
+        self.training_duration_seconds = duration
+        trained_network.training_duration_seconds = duration
+
+        return trained_network
 
     def _move_to_device(
         self,

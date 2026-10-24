@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 
 from src.modules.neuronal_networks.manipulating_data import MachineDataTensor
-from src.modules.neuronal_networks.model_io import JSONValue
+from src.modules.neuronal_networks.model_data_io.model_io import JSONValue
 from src.modules.neuronal_networks.surrogate_model import SurrogateModel
 
 

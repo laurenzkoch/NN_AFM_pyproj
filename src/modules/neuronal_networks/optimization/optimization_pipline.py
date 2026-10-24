@@ -1,14 +1,25 @@
 import logging
-import math
 
+from src.config.config_mcad_parameters import OUTPUT_NEURON_LIST
 from src.config.config_paths import PATH_TRAINING_DATA
 from src.modules.data_managment.experiment_utils import validate_search_settings
-from src.modules.neuronal_networks.manipulating_data import DataLoader
-from src.modules.neuronal_networks.nn_training_torch import NNTrainer
-from src.modules.neuronal_networks.optimization.optimizer import (
-    NNOptimizer,
-    OptimizationResult,
+from src.modules.neuronal_networks.autoencoder_collection import (
+    AutoencoderCollection,
 )
+from src.modules.neuronal_networks.manipulating_data import (
+    DataLoader,
+    TrainValidationTestDataTensors,
+)
+from src.modules.neuronal_networks.nn_training_torch import NNTrainer
+from src.modules.neuronal_networks.optimization.optimization_service import (
+    OptimizationService,
+)
+from src.modules.neuronal_networks.optimization.optimization_types import (
+    ChannelOptimizationResult,
+    NetworkSearchSpace,
+    NetworkType,
+)
+from src.modules.neuronal_networks.surrogate_model import SurrogateModel
 from src.modules.Pipeline_and_GUI.events import EventType, PipelineEvent
 from src.modules.Pipeline_and_GUI.pipeline import MyPipeline
 
@@ -19,9 +30,8 @@ class OptimizationPipline(MyPipeline):
     def __init__(
         self,
         csv_file: str,
-        max_num_neuron_per_layer: int,
-        max_num_layers: int,
-        neuron_step: int,
+        network_type: NetworkType,
+        search_space: NetworkSearchSpace,
         n_trials: int,
         num_kernel: int,
         learning_rate: float = 1e-3,
@@ -31,15 +41,28 @@ class OptimizationPipline(MyPipeline):
         test_filenames: tuple[str, ...] = (),
         seed: int = 42,
         worker_timeout_seconds: float | None = None,
+        autoencoders: AutoencoderCollection | None = None,
     ) -> None:
         validate_search_settings(
-            max_num_layers, max_num_neuron_per_layer, neuron_step, n_trials, 1
+            search_space.max_num_layers,
+            search_space.max_num_units_per_layer,
+            search_space.unit_step,
+            n_trials,
+            1,
         )
 
-        if not math.isfinite(learning_rate) or learning_rate <= 0:
-            raise ValueError("Learning rate must be finite and positive")
-        if not math.isfinite(weight_decay) or weight_decay < 0:
-            raise ValueError("Weight decay must be finite and nonnegative")
+        if network_type not in ("MLP", "CNN"):
+            raise ValueError("network_type must be 'MLP' or 'CNN'.")
+
+        if network_type == "CNN" and autoencoders is not None:
+            raise ValueError("CNN optimization cannot receive trained autoencoders.")
+
+        trainer: NNTrainer = NNTrainer(
+            learning_rate=learning_rate,
+            weight_decay=weight_decay,
+            num_epochs=num_epochs,
+            patience=patience,
+        )
 
         super().__init__(
             service_name="Optimization",
@@ -47,37 +70,40 @@ class OptimizationPipline(MyPipeline):
         )
 
         try:
-            self.data = DataLoader(PATH_TRAINING_DATA).load(
-                filename=csv_file, test_filenames=tuple(test_filenames)
+            self.data: TrainValidationTestDataTensors = DataLoader(
+                PATH_TRAINING_DATA
+            ).load(
+                filename=csv_file,
+                test_filenames=tuple(test_filenames),
             )
 
-            self.trained_models = 0
-            self.status_text = "Ready"
-            self.max_progress_steps = n_trials * self.num_workers
-            self.num_workers = min(
-                self.num_workers,
-                self.max_progress_steps,
+            if autoencoders is not None:
+                self.data = autoencoders.prepare_data(self.data)
+
+            self.network_type: NetworkType = network_type
+            self.trainer: NNTrainer = trainer
+            self.completed_trials: int = 0
+            self.status_text: str = "Ready"
+
+            self.max_progress_steps: int = (
+                len(OUTPUT_NEURON_LIST) * n_trials * self.num_workers
             )
-            self.trainer = NNTrainer(
-                learning_rate=learning_rate,
-                weight_decay=weight_decay,
-                num_epochs=num_epochs,
-                patience=patience,
-            )
-            self.service: NNOptimizer = NNOptimizer(
+
+            self.service: OptimizationService = OptimizationService(
                 data=self.data,
+                trainer=self.trainer,
+                network_type=network_type,
+                search_space=search_space,
                 progress_queue=self.progress_queue,
                 log_queue=self.log_queue,
-                trainer=self.trainer,
+                cancellation=self.cancellation,
                 num_workers=self.num_workers,
-                max_num_layers=max_num_layers,
-                max_num_neurons_per_layer=max_num_neuron_per_layer,
-                neuron_step=neuron_step,
                 n_trials=n_trials,
                 seed=seed,
                 worker_timeout_seconds=worker_timeout_seconds,
-                cancellation=self.cancellation,
+                autoencoders=autoencoders,
             )
+
         except BaseException:
             try:
                 self._close_queues()
@@ -87,46 +113,46 @@ class OptimizationPipline(MyPipeline):
                 )
             raise
 
-        self.optimization_result: OptimizationResult | None = None
+        self.optimization_results: tuple[ChannelOptimizationResult, ...] = ()
 
-    def run(self) -> OptimizationResult:
+        self.result: SurrogateModel | AutoencoderCollection | None = None
+
+    def run(self) -> SurrogateModel | AutoencoderCollection:
         return self.start()
 
-    def start(self) -> OptimizationResult:
+    def start(self) -> SurrogateModel | AutoencoderCollection:
         self._claim_run()
         self._run_pipeline()
 
-        result: OptimizationResult | None = self.service.result
+        result: SurrogateModel | AutoencoderCollection | None = self.service.result
 
         if result is None:
-            raise RuntimeError("Optimization finished without a result")
+            raise RuntimeError("Optimization finished without trained networks.")
 
-        self.optimization_result = result
+        self.optimization_results = self.service.optimization_results
+        self.result = result
+
         return result
 
     def _queue_adapter(
         self,
         event: PipelineEvent,
     ) -> tuple[int, str, bool]:
-        finished = False
+        finished: bool = False
 
         if event.event_type == EventType.STARTED:
             self.status_text = event.text
 
         elif event.event_type == EventType.PROGRESS:
-            self.trained_models += event.increment
-            self.status_text = "Running"
+            if event.outcome == "trial_completed":
+                self.completed_trials += event.increment
 
-        elif event.event_type == EventType.FINISHED:
+        elif event.event_type in (
+            EventType.FINISHED,
+            EventType.CANCELLED,
+            EventType.FAILED,
+        ):
             self.status_text = event.text
             finished = True
 
-        elif event.event_type == EventType.CANCELLED:
-            self.status_text = event.text
-            finished = True
-
-        elif event.event_type == EventType.FAILED:
-            self.status_text = event.text
-            finished = True
-
-        return self.trained_models, self.status_text, finished
+        return self.completed_trials, self.status_text, finished

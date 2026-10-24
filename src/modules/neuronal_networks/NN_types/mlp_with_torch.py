@@ -23,13 +23,14 @@ class MLP(nn.Module):
         if any(n <= 0 for n in hidden_layer_neurons):
             raise ValueError("All hidden layer sizes must be greater than 0.")
 
-        self.output_dims = output_dims
+        self.num_input_neurons: int = num_input_neurons
+        self.hidden_layer_neurons: tuple[int, ...] = tuple(hidden_layer_neurons)
+        self.output_dims: tuple[int, ...] = tuple(output_dims)
         self.model_state_dict: dict[str, torch.Tensor]
+        self.training_duration_seconds: float | None = None
 
         layers: list[nn.Module] = []
-
         in_features = num_input_neurons
-
         for hidden_size in hidden_layer_neurons:
             layers.append(nn.Linear(in_features, hidden_size))
 

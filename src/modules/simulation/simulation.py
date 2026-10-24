@@ -156,7 +156,7 @@ class MCADSimulation:
                 if not np.isfinite(numeric).all():
                     raise ValueError("CSV contains nonfinite values")
             except (OSError, ValueError, KeyError) as exc:
-                logger.warning("Skip result source %s: %s", path.name, exc)
+                logger.warning("Skip channel_result source %s: %s", path.name, exc)
                 continue
             result[path.resolve().as_posix()] = frame.reset_index(drop=True)
         return result
@@ -217,11 +217,11 @@ class MCADSimulation:
 
     def _append_result(self, values_row: list[float]) -> None:
         if len(values_row) != len(CSV_PARAMETERS):
-            raise ValueError("Wrong result width")
+            raise ValueError("Wrong channel_result width")
         # Match the existing CSV writer's four-decimal storage precision.
         values = [float(f"{float(value):.4f}") for value in values_row]
         if not np.isfinite(values).all():
-            raise ValueError("Nonfinite simulation result")
+            raise ValueError("Nonfinite simulation channel_result")
         write_row_in_csv(self.csv_path, values)
         key = self.csv_path.resolve().as_posix()
         current = self.dataframes.get(key)

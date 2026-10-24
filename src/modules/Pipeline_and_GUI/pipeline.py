@@ -71,11 +71,16 @@ class MyPipeline:
         saved_level = root_logger.level
         try:
             self.queue_listener = setup_main_logging(self.log_queue)
-            self.ui = self._initialize_ui(title=self.service_name)
-            self.service_thread = self._initialize_service_thread()
-            self.service_thread.start()
+
+            ui: MyUserInterface = self._initialize_ui(title=self.service_name)
+            self.ui = ui
+
+            service_thread: Thread = self._initialize_service_thread()
+            self.service_thread = service_thread
+
+            service_thread.start()
             self._poll_queue()
-            self.ui.run_ui()
+            ui.run_ui()
         finally:
             try:
                 self._wait_for_thread()
@@ -205,7 +210,7 @@ class MyPipeline:
             ui.mark_finished()
             return
 
-        self.ui.root.after(100, self._poll_queue)
+        ui.root.after(100, self._poll_queue)
 
     def _claim_run(self) -> None:
         with self._start_lock:

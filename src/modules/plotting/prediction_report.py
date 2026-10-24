@@ -11,11 +11,28 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.font_manager import FontProperties, findfont
 from matplotlib.gridspec import SubplotSpec
+from matplotlib.table import Table
+from matplotlib.table import table as create_table
+from matplotlib.transforms import Bbox
 
-from src.config.config_paths import PATH_DATA_TRAINED_NN
 from src.modules.data_managment.experiment_utils import file_sha256
-from src.modules.neuronal_networks.evaluation_io import EvaluationBundle
-from src.modules.neuronal_networks.model_io import JSONValue, SurrogateCheckpoint
+from src.modules.neuronal_networks.model_data_io.autoencoder_io import (
+    AutoencoderCollectionCheckpoint,
+    load_autoencoders,
+)
+from src.modules.neuronal_networks.model_data_io.evaluation_io import EvaluationBundle
+from src.modules.neuronal_networks.model_data_io.model_io import (
+    JSONValue,
+    SurrogateCheckpointV2,
+    load_bundle,
+)
+from src.modules.neuronal_networks.model_data_io.model_paths import (
+    resolve_model_directory,
+)
+from src.modules.neuronal_networks.model_data_io.network_io import (
+    AutoencoderCheckpoint,
+    checked_training_duration,
+)
 from src.modules.plotting.prediction_base import (
     CHANNEL_LABELS,
     DATASET_STYLES,
@@ -25,21 +42,16 @@ from src.modules.plotting.prediction_base import (
     format_mean_r2,
 )
 
+type ReportCheckpoint = SurrogateCheckpointV2 | AutoencoderCollectionCheckpoint
+
 logger = logging.getLogger(__name__)
 
 
 def _load_report_data(
-    model_folder: str,
+    model_folder: str | Path,
 ) -> tuple[Path, EvaluationBundle]:
-    """Load saved evaluation data and determine the report destination."""
-    if (
-        not model_folder
-        or model_folder in {".", ".."}
-        or Path(model_folder).name != model_folder
-    ):
-        raise ValueError("Please state only the model folder name.")
 
-    model_directory: Path = Path(PATH_DATA_TRAINED_NN) / model_folder
+    model_directory: Path = resolve_model_directory(model_folder)
     evaluation_path: Path = model_directory / "evaluation.pt"
 
     if not evaluation_path.is_file():
@@ -67,16 +79,21 @@ def _load_report_data(
 
 
 def _load_report_checkpoint(
-    model_folder: str,
+    model_folder: str | Path,
     evaluation: EvaluationBundle,
-) -> SurrogateCheckpoint:
-    """Load the checkpoint belonging to the saved evaluation."""
+) -> ReportCheckpoint:
+    """Load the complete model belonging to the saved evaluation."""
+    model_directory: Path = resolve_model_directory(model_folder)
     model_filename: str = evaluation["model_filename"]
 
-    if not model_filename or Path(model_filename).name != model_filename:
+    if (
+        not model_filename
+        or model_filename in {".", ".."}
+        or Path(model_filename).name != model_filename
+    ):
         raise ValueError("Invalid model filename in evaluation data.")
 
-    model_path: Path = Path(PATH_DATA_TRAINED_NN) / model_folder / model_filename
+    model_path: Path = model_directory / model_filename
 
     if not model_path.is_file():
         raise FileNotFoundError(f"Model file not found: {model_path}")
@@ -84,31 +101,15 @@ def _load_report_checkpoint(
     if file_sha256(model_path) != evaluation["model_sha256"]:
         raise ValueError("The model file does not match the saved evaluation.")
 
-    raw: object = torch.load(
-        model_path,
-        map_location="cpu",
-        weights_only=True,
-    )
+    if evaluation["evaluation_kind"] == "reconstruction":
+        _, cnn_checkpoint = load_autoencoders(model_path)
+        return cnn_checkpoint
 
-    if not isinstance(raw, dict):
-        raise TypeError("The model checkpoint must contain a dictionary.")
+    if evaluation["evaluation_kind"] == "prediction":
+        _, surrogate_checkpoint = load_bundle(model_path)
+        return surrogate_checkpoint
 
-    required_fields: set[str] = {
-        "model_type",
-        "activation",
-        "feature_names",
-        "channel_names",
-        "output_dims",
-        "hidden_layers",
-        "seed",
-        "metrics",
-    }
-    missing_fields: set[str] = required_fields.difference(raw)
-
-    if missing_fields:
-        raise ValueError(f"Missing checkpoint fields: {sorted(missing_fields)}")
-
-    return cast(SurrogateCheckpoint, raw)
+    raise ValueError("Unsupported evaluation kind.")
 
 
 def _create_report_page(
@@ -129,8 +130,14 @@ def _create_report_page(
         wspace=0.12,
     )
 
+    report_title: str = (
+        "Bewertung der CNN-Rekonstruktion"
+        if evaluation["evaluation_kind"] == "reconstruction"
+        else "Bewertung des Ersatzmodells"
+    )
+
     fig.suptitle(
-        "Bewertung des Ersatzmodells",
+        report_title,
         fontsize=11,
         fontweight="bold",
     )
@@ -157,13 +164,14 @@ def _create_report_page(
 
         summary_rows.append([style.label, str(machine_count), mean_r2])
 
-    summary_table = summary_ax.table(
+    summary_table: Table = create_table(
+        ax=summary_ax,
         cellText=summary_rows,
         colLabels=["Datensatz", "Maschinen", "R² mean · sieben Kanäle"],
         colWidths=[0.28, 0.22, 0.50],
         cellLoc="center",
         colLoc="center",
-        bbox=(0.20, 0.0, 0.60, 0.90),
+        bbox=Bbox.from_bounds(0.20, 0.0, 0.60, 0.90),
     )
     summary_table.auto_set_font_size(False)
     summary_table.set_fontsize(9)
@@ -187,11 +195,50 @@ def _create_report_page(
     return fig, panel_specs, legend_ax
 
 
+def _channel_architecture_text(
+    checkpoint: ReportCheckpoint,
+    channel_index: int,
+) -> str:
+    """Describe the networks belonging to one output channel."""
+    lines: list[str] = []
+    cnn: AutoencoderCheckpoint | None
+
+    if checkpoint["model_type"] == "autoencoder_collection":
+        cnn = checkpoint["autoencoders"][channel_index]
+    else:
+        part = checkpoint["submodels"][channel_index]
+        mlp = part["mlp"]
+
+        mlp_layers: tuple[int, ...] = (
+            mlp["num_input_neurons"],
+            *mlp["hidden_layers"],
+            math.prod(mlp["output_dims"]),
+        )
+        mlp_description: str = " → ".join(str(value) for value in mlp_layers)
+
+        lines.append(f"MLP: {mlp_description}")
+        cnn = part["cnn_autoencoder"]
+
+    if cnn is not None:
+        cnn_layers: tuple[int, ...] = (
+            cnn["input_channels"],
+            *cnn["features"],
+        )
+        cnn_description: str = " → ".join(str(value) for value in cnn_layers)
+
+        lines.append(
+            f"CNN: {cnn_description}; z={cnn['latent_dim']}; k={cnn['kernel_size']}"
+        )
+
+    return "\n".join(lines)
+
+
 def _draw_report_panel(
     fig: Figure,
     panel_spec: SubplotSpec,
     evaluation: EvaluationBundle,
     channel_index: int,
+    checkpoint: ReportCheckpoint,
 ) -> Axes:
     """Arrange a shared prediction plot and its channel metrics."""
     channel_name: str = evaluation["channel_names"][channel_index]
@@ -202,15 +249,17 @@ def _draw_report_panel(
     quantity_name: str = CHANNEL_LABELS[channel_name][0]
 
     panel_grid = panel_spec.subgridspec(
-        2,
+        3,
         1,
-        height_ratios=(3.0, 1.0),
+        height_ratios=(2.2, 2.0, 0.8),
         hspace=0.0,
     )
 
     ax: Axes = fig.add_subplot(panel_grid[0])
     metrics_ax: Axes = fig.add_subplot(panel_grid[1])
     metrics_ax.set_axis_off()
+    architecture_ax: Axes = fig.add_subplot(panel_grid[2])
+    architecture_ax.set_axis_off()
 
     draw_prediction_axis(
         ax,
@@ -233,6 +282,20 @@ def _draw_report_panel(
         bbox=(0.0, 0.0, 1.0, 1.0),
     )
 
+    architecture_ax.text(
+        0.0,
+        0.5,
+        _channel_architecture_text(
+            checkpoint,
+            channel_index,
+        ),
+        transform=architecture_ax.transAxes,
+        fontsize=9,
+        horizontalalignment="left",
+        verticalalignment="center",
+        linespacing=1.1,
+    )
+
     return ax
 
 
@@ -253,49 +316,119 @@ def _format_training_setting(value: JSONValue) -> str:
     return f"{value:.4g}"
 
 
+def _format_training_duration(value: float | None) -> str:
+    """Format the summed training duration of the included networks."""
+    duration: float | None = checked_training_duration(value)
+
+    if duration is None:
+        return "unbekannt / unvollständig"
+
+    if duration < 60:
+        return f"{duration:.2f} s"
+
+    if duration < 3600:
+        return f"{duration / 60:.2f} min"
+
+    return f"{duration / 3600:.2f} h"
+
+
+def _training_settings_lines(
+    label: str,
+    settings: JSONValue,
+) -> list[str]:
+    """Describe training settings compactly using two lines."""
+    if settings is None:
+        return [f"{label}: Trainingssettings nicht gespeichert"]
+
+    if not isinstance(settings, dict):
+        raise TypeError("Training settings must contain a dictionary.")
+
+    learning_rate: str = _format_training_setting(settings.get("learning_rate"))
+    weight_decay: str = _format_training_setting(settings.get("weight_decay"))
+    maximum_epochs: str = _format_training_setting(settings.get("num_epochs"))
+    patience: str = _format_training_setting(settings.get("patience"))
+
+    return [
+        f"{label} lr={learning_rate}; wd={weight_decay}",
+        f"{label} Epochen≤{maximum_epochs}; Patience={patience}",
+    ]
+
+
 def _build_model_information(
-    checkpoint: SurrogateCheckpoint,
+    checkpoint: ReportCheckpoint,
 ) -> str:
-    """Describe the saved model architecture and training settings."""
-    training: JSONValue = checkpoint["metrics"].get("training_config")
+    """Describe training settings and the summed network training time."""
+    lines: list[str]
+    total_duration: float | None
+    activation: str
 
-    if training is None:
-        training_settings: dict[str, JSONValue] = {}
-    elif isinstance(training, dict):
-        training_settings = training
-    else:
-        raise TypeError("'training_config' must contain a dictionary.")
+    if checkpoint["model_type"] == "autoencoder_collection":
+        cnn_count: int = len(checkpoint["autoencoders"])
+        activation = checkpoint["autoencoders"][0]["activation"]
 
-    layer_sizes: tuple[int, ...] = (
-        len(checkpoint["feature_names"]),
-        *checkpoint["hidden_layers"],
-        math.prod(checkpoint["output_dims"]),
-    )
-    architecture: str = " → ".join(str(size) for size in layer_sizes)
-    model_count: int = len(checkpoint["channel_names"])
-
-    learning_rate: str = _format_training_setting(
-        training_settings.get("learning_rate")
-    )
-    weight_decay: str = _format_training_setting(training_settings.get("weight_decay"))
-    maximum_epochs: str = _format_training_setting(training_settings.get("num_epochs"))
-    patience: str = _format_training_setting(training_settings.get("patience"))
-
-    return "\n".join(
-        [
-            f"Modell: {model_count} MLP-Submodelle",
-            f"Architektur je MLP:\n{architecture}",
-            f"Aktivierung: {checkpoint['activation']}",
-            f"Lernrate: {learning_rate}",
-            f"Weight Decay: {weight_decay}",
-            f"Max. Epochen: {maximum_epochs}",
-            f"Early-Stopping-Patience: {patience}",
+        lines = [
+            f"Modell: {cnn_count} CNNs",
+            f"CNN-Seed: {checkpoint['seed']}",
         ]
-    )
+        lines.extend(
+            _training_settings_lines(
+                "CNN",
+                checkpoint["metrics"].get("training_config"),
+            )
+        )
+
+        durations: list[float | None] = [
+            checked_training_duration(cnn["training_duration_seconds"])
+            for cnn in checkpoint["autoencoders"]
+        ]
+
+        total_duration = None
+
+        if all(duration is not None for duration in durations):
+            total_duration = checked_training_duration(
+                sum(duration for duration in durations if duration is not None)
+            )
+
+    else:
+        mlp_count: int = len(checkpoint["submodels"])
+        included_cnn_count: int = sum(
+            part["cnn_autoencoder"] is not None for part in checkpoint["submodels"]
+        )
+        activation = checkpoint["submodels"][0]["mlp"]["activation"]
+
+        lines = [
+            f"Modell: {mlp_count} MLPs, {included_cnn_count} CNNs",
+            f"MLP-Seed: {checkpoint['seed']}",
+        ]
+        lines.extend(
+            _training_settings_lines(
+                "MLP",
+                checkpoint["metrics"].get("training_config"),
+            )
+        )
+
+        if included_cnn_count:
+            cnn_seed: str = _format_training_setting(
+                checkpoint["metrics"].get("autoencoder_seed")
+            )
+            lines.append(f"CNN-Seed: {cnn_seed}")
+            lines.extend(
+                _training_settings_lines(
+                    "CNN",
+                    checkpoint["metrics"].get("autoencoder_training_config"),
+                )
+            )
+
+        total_duration = checkpoint["training_duration_seconds"]
+
+    lines.insert(1, f"Aktivierung: {activation}")
+    lines.append(f"Σ Trainingszeit: {_format_training_duration(total_duration)}")
+
+    return "\n".join(lines)
 
 
 @mpl.rc_context(rc={**PREDICTION_STYLE, "savefig.bbox": None})
-def create_prediction_report(model_folder: str) -> Path:
+def create_prediction_report(model_folder: str | Path) -> Path:
     """Save a single-page PDF report containing all seven output channels."""
     findfont(
         FontProperties(family="Arial"),
@@ -305,7 +438,7 @@ def create_prediction_report(model_folder: str) -> Path:
     output_path: Path
     evaluation: EvaluationBundle
     output_path, evaluation = _load_report_data(model_folder)
-    checkpoint: SurrogateCheckpoint = _load_report_checkpoint(
+    checkpoint: ReportCheckpoint = _load_report_checkpoint(
         model_folder,
         evaluation,
     )
@@ -316,12 +449,18 @@ def create_prediction_report(model_folder: str) -> Path:
     legend_ax: Axes
     fig, panel_specs, legend_ax = _create_report_page(
         evaluation,
-        model_folder,
+        output_path.parent.parent.name,
     )
 
     try:
         plot_axes: list[Axes] = [
-            _draw_report_panel(fig, spec, evaluation, channel_index)
+            _draw_report_panel(
+                fig,
+                spec,
+                evaluation,
+                channel_index,
+                checkpoint,
+            )
             for channel_index, spec in enumerate(panel_specs)
         ]
 
@@ -369,7 +508,7 @@ def create_prediction_report(model_folder: str) -> Path:
             facecolor="white",
             metadata={
                 "Title": "Bewertung des Ersatzmodells",
-                "Subject": model_folder,
+                "Subject": str(model_folder),
             },
         )
     finally:

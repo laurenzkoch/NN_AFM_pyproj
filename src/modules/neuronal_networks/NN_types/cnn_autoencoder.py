@@ -11,30 +11,51 @@ class Conv3dAutoencoder(nn.Module):
         self,
         latent_dim: int,
         features: tuple[int, ...],
+        input_channels: int = 1,
         map_shape: tuple[int, ...] = MAP_SIZE,
         kernel_size: int = 3,
         activation: type[nn.Module] = nn.ReLU,
     ) -> None:
         super().__init__()
 
-        is_increasing = all(
-            current > previous for previous, current in zip(features, features[1:])
-        )
-        if not is_increasing:
-            raise ValueError("features must be increasing")
+        if type(latent_dim) is not int or latent_dim < 1:
+            raise ValueError("latent_dim must be a positive integer.")
+
+        if type(input_channels) is not int or input_channels < 1:
+            raise ValueError("input_channels must be a positive integer.")
+
+        if not features or any(
+            type(value) is not int or value < 1 for value in features
+        ):
+            raise ValueError("features must contain positive hidden feature counts.")
+
+        if any(
+            current <= previous for previous, current in zip(features, features[1:])
+        ):
+            raise ValueError("Hidden feature counts must be increasing.")
+
+        if len(map_shape) != 3 or any(
+            type(value) is not int or value < 1 for value in map_shape
+        ):
+            raise ValueError("map_shape must contain three positive integers.")
+
+        if type(kernel_size) is not int or kernel_size < 1 or kernel_size % 2 == 0:
+            raise ValueError("kernel_size must be a positive odd integer.")
 
         self.model_state_dict: dict[str, Tensor]
 
-        self.map_shape = map_shape
-        self.features = features
+        self.input_channels: int = input_channels
+        self.latent_dim: int = latent_dim
+        self.features: tuple[int, ...] = features
+        self.map_shape: tuple[int, ...] = map_shape
+        self.kernel_size: int = kernel_size
+        self.training_duration_seconds: float | None = None
 
-        if kernel_size % 2 == 0:
-            raise ValueError("kernel_size must be odd")
-        padding = kernel_size // 2
+        padding: int = kernel_size // 2
 
         encoder_layers: list[nn.Module] = []
-        in_channels = features[0]
-        for out_channels in features[1:]:
+        in_channels: int = input_channels
+        for out_channels in features:
             encoder_layers.append(
                 nn.Conv3d(
                     in_channels=in_channels,
@@ -47,9 +68,12 @@ class Conv3dAutoencoder(nn.Module):
             in_channels = out_channels
 
         decoder_layers: list[nn.Module] = []
-        reversed_features = list(reversed(features))
-        in_channels = reversed_features[0]
-        for idx, out_channels in enumerate(reversed_features[1:]):
+        decoder_channels: tuple[int, ...] = (
+            *reversed(features[:-1]),
+            input_channels,
+        )
+        in_channels = features[-1]
+        for idx, out_channels in enumerate(decoder_channels):
             decoder_layers.append(
                 nn.Conv3d(
                     in_channels=in_channels,
@@ -58,7 +82,7 @@ class Conv3dAutoencoder(nn.Module):
                     padding=padding,
                 )
             )
-            if idx < len(reversed_features[1:]) - 1:
+            if idx < len(decoder_channels) - 1:
                 decoder_layers.append(activation())
             in_channels = out_channels
 

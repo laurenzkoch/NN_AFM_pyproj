@@ -11,6 +11,9 @@ from src.modules.neuronal_networks.manipulating_data import (
     TrainValidationTestDataTensors,
 )
 from src.modules.neuronal_networks.nn_training_torch import NNTrainer
+from src.modules.neuronal_networks.optimization.optimization_types import (
+    NetworkSearchSpace,
+)
 from src.modules.neuronal_networks.optimization.optimizer import NNOptimizer
 from src.modules.Pipeline_and_GUI.cancellation import (
     CancellationToken,
@@ -193,9 +196,13 @@ def test_optimizer_cancellation_cleans_up_all_started_workers(
         progress_queue=progress,
         log_queue=logs,
         trainer=NNTrainer(num_epochs=1, patience=1),
-        max_num_layers=1,
-        max_num_neurons_per_layer=4,
-        neuron_step=4,
+        network_type="MLP",
+        channel_index=0,
+        search_space=NetworkSearchSpace(
+            max_num_layers=1,
+            max_num_units_per_layer=4,
+            unit_step=4,
+        ),
         num_workers=2,
         n_trials=1,
         cancellation=token,
@@ -208,4 +215,4 @@ def test_optimizer_cancellation_cleans_up_all_started_workers(
     assert all(process.pid is not None for process in created)
     assert all(not process.is_alive() for process in created)
     assert all(process.closed for process in created)
-    assert optimizer.result is None
+    assert optimizer.channel_result is None

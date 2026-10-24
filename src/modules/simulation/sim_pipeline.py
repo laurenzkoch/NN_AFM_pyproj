@@ -197,8 +197,9 @@ class SimulationPipeline(MyPipeline):
             self.service.temp_root = run_directory
 
             if self.start_eduvpn:
-                self.eduvpn_processor = EDUVPNProcessor()
-                self.eduvpn_processor.start()
+                vpn_processor: EDUVPNProcessor = EDUVPNProcessor()
+                self.eduvpn_processor = vpn_processor
+                vpn_processor.start()
 
             self._run_pipeline()
 

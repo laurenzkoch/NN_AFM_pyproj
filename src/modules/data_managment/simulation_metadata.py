@@ -262,7 +262,7 @@ def adopt_legacy_csv(
     frame = validate_result_csv(csv_path)
 
     if frame.empty:
-        raise ValueError("The old file does not contain any result rows.")
+        raise ValueError("The old file does not contain any channel_result rows.")
 
     if file_sha256(csv_path) != csv_hash:
         raise ValueError("The CSV file was modified during the audit.")

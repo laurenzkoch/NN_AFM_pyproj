@@ -5,11 +5,13 @@ from typing import Literal
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.table import Table
+from matplotlib.table import table as create_table
+from matplotlib.transforms import Bbox
 from numpy.typing import NDArray
 from torch import Tensor
 
-from src.modules.neuronal_networks.evaluation_io import EvaluationBundle
-from src.modules.neuronal_networks.model_io import JSONValue
+from src.modules.neuronal_networks.model_data_io.evaluation_io import EvaluationBundle
+from src.modules.neuronal_networks.model_data_io.model_io import JSONValue
 
 CHANNEL_LABELS: dict[str, tuple[str, str]] = {
     "ShaftTorque": ("Drehmoment", "Nm"),
@@ -94,12 +96,12 @@ class DatasetStyle:
 
 DATASET_STYLES: tuple[DatasetStyle, ...] = (
     DatasetStyle(
-        split_name="train",
-        label="Training",
-        color="#999999",
-        marker="o",
-        alpha=0.30,
-        marker_size=10.0,
+        split_name="test",
+        label="Test",
+        color="#e37222",
+        marker="s",
+        alpha=0.65,
+        marker_size=18.0,
     ),
     DatasetStyle(
         split_name="validation",
@@ -110,12 +112,12 @@ DATASET_STYLES: tuple[DatasetStyle, ...] = (
         marker_size=18.0,
     ),
     DatasetStyle(
-        split_name="test",
-        label="Test",
-        color="#e37222",
-        marker="s",
-        alpha=0.65,
-        marker_size=18.0,
+        split_name="train",
+        label="Training",
+        color="#999999",
+        marker="o",
+        alpha=0.30,
+        marker_size=10.0,
     ),
 )
 
@@ -216,7 +218,11 @@ def draw_prediction_axis(
     )
 
     ax.set_xlabel(f"MotorCAD-Referenz / {unit}")
-    ax.set_ylabel(f"Modellvorhersage / {unit}")
+    is_reconstruction: bool = evaluation["evaluation_kind"] == "reconstruction"
+    output_label: str = (
+        "CNN-Rekonstruktion" if is_reconstruction else "Modellvorhersage"
+    )
+    ax.set_ylabel(f"{output_label} / {unit}")
     ax.set_xlim(limits)
     ax.set_ylim(limits)
     ax.set_aspect("equal", adjustable="box")
@@ -227,7 +233,7 @@ def draw_prediction_axis(
         color="0.35",
         linestyle="--",
         linewidth=1.0,
-        label="Ideale Vorhersage",
+        label=("Ideale Rekonstruktion" if is_reconstruction else "Ideale Vorhersage"),
         zorder=1,
     )
 
@@ -316,14 +322,16 @@ def draw_channel_metrics(
         [0.30, 0.19, 0.23, 0.28] if include_mean else [0.44, 0.23, 0.33]
     )
 
-    table: Table = ax.table(
+    table: Table = create_table(
+        ax=ax,
         cellText=rows,
         colLabels=headers,
         colWidths=widths,
         cellLoc="right",
         colLoc="right",
-        bbox=bbox,
+        bbox=Bbox.from_bounds(*bbox),
     )
+
     table.auto_set_font_size(False)
     table.set_fontsize(9)
 

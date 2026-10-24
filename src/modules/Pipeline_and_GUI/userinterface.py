@@ -39,12 +39,23 @@ class MyUserInterface:
             if overall_max_value < 1:
                 raise ValueError("overall_max_value must be at least 1.")
 
-            self.overall_value_label = ttk.Label(
+            overall_label: ttk.Label = ttk.Label(
                 self.root,
                 text=f"Files: 0 from {overall_max_value}",
                 font=("Arial", 14),
             )
-            self.overall_value_label.pack(pady=5)
+            overall_label.pack(pady=5)
+            self.overall_value_label = overall_label
+
+            overall_bar: ttk.Progressbar = ttk.Progressbar(
+                self.root,
+                orient="horizontal",
+                length=350,
+                mode="determinate",
+                maximum=overall_max_value,
+            )
+            overall_bar.pack(pady=5)
+            self.overall_progressbar = overall_bar
 
             self.overall_progressbar = ttk.Progressbar(
                 self.root,

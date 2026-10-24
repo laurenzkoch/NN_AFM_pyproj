@@ -10,8 +10,10 @@ from matplotlib.figure import Figure
 from matplotlib.font_manager import FontProperties, findfont
 from matplotlib.layout_engine import ConstrainedLayoutEngine
 
-from src.config.config_paths import PATH_DATA_TRAINED_NN
-from src.modules.neuronal_networks.evaluation_io import EvaluationBundle
+from src.modules.neuronal_networks.model_data_io.evaluation_io import EvaluationBundle
+from src.modules.neuronal_networks.model_data_io.model_paths import (
+    resolve_model_directory,
+)
 from src.modules.plotting.prediction_base import (
     CHANNEL_LABELS,
     PREDICTION_STYLE,
@@ -23,21 +25,14 @@ logger = logging.getLogger(__name__)
 
 
 @mpl.rc_context(rc=PREDICTION_STYLE)
-def plot_prediction_results(model_folder: str) -> Path:
-    """Save individual prediction plots using the shared drawing functions."""
+def plot_prediction_results(model_folder: str | Path) -> Path:
+
     findfont(
         FontProperties(family="Arial"),
         fallback_to_default=False,
     )
 
-    if (
-        not model_folder
-        or model_folder in {".", ".."}
-        or Path(model_folder).name != model_folder
-    ):
-        raise ValueError("Please state only the model folder name.")
-
-    model_directory: Path = Path(PATH_DATA_TRAINED_NN) / model_folder
+    model_directory: Path = resolve_model_directory(model_folder)
     evaluation_path: Path = model_directory / "evaluation.pt"
     output_directory: Path = model_directory / "result_plots"
 

@@ -12,11 +12,14 @@ from src.config.config_mcad_parameters import (
     OUTPUT_NEURON_LIST,
 )
 from src.modules.data_managment.experiment_utils import file_sha256
+from src.modules.neuronal_networks.autoencoder_collection import (
+    AutoencoderCollection,
+)
 from src.modules.neuronal_networks.manipulating_data import (
     MachineDataTensor,
     TrainValidationTestDataTensors,
 )
-from src.modules.neuronal_networks.model_io import JSONValue
+from src.modules.neuronal_networks.model_data_io.model_io import JSONValue
 from src.modules.neuronal_networks.surrogate_model import SurrogateModel
 from src.modules.neuronal_networks.testing import (
     R2Report,
@@ -33,7 +36,8 @@ class EvaluationSplit(TypedDict):
 
 
 class EvaluationBundle(TypedDict):
-    format_version: Literal[1]
+    format_version: Literal[2]
+    evaluation_kind: Literal["prediction", "reconstruction"]
     value_scale: Literal["physical"]
 
     model_filename: str
@@ -50,7 +54,7 @@ class EvaluationBundle(TypedDict):
 
 @torch.no_grad()
 def _build_evaluation_split(
-    model: SurrogateModel,
+    model: SurrogateModel | AutoencoderCollection,
     data: MachineDataTensor,
     machine_ids: tuple[str, ...],
     minimum: Tensor,
@@ -91,14 +95,18 @@ def _build_evaluation_split(
     if not bool((scale > 0).all().item()):
         raise ValueError("Normalization denominators must be positive.")
 
-    for part in model.submodels:
-        part.mlp.eval()
-        if part.cnn_autoencoder is not None:
-            part.cnn_autoencoder.eval()
+    prediction: Tensor
 
-    prediction: Tensor = (
-        model.get_prediction(data.geometry_tensor).detach().cpu().double()
-    )
+    if isinstance(model, AutoencoderCollection):
+        prediction = model.reconstruct(data.map_tensor).detach().cpu().double()
+    else:
+        for part in model.submodels:
+            part.mlp.eval()
+
+            if part.cnn_autoencoder is not None:
+                part.cnn_autoencoder.eval()
+
+        prediction = model.get_prediction(data.geometry_tensor).detach().cpu().double()
 
     if prediction.shape != reference.shape:
         raise ValueError("Prediction and map_reference_validation shapes must match.")
@@ -141,10 +149,13 @@ def _build_evaluation_split(
 
 def save_evaluation(
     model_path: Path,
-    model: SurrogateModel,
+    model: SurrogateModel | AutoencoderCollection,
     data: TrainValidationTestDataTensors,
 ) -> Path:
-    """Save physical predictions and references beside the model."""
+
+    if isinstance(model, AutoencoderCollection):
+        model.validate_compatible(data)
+
     if not model_path.is_file():
         raise FileNotFoundError(f"Model file not found: {model_path}")
 
@@ -198,7 +209,12 @@ def save_evaluation(
             raise ValueError("Map axes do not match evaluation tensor shapes.")
 
     bundle: EvaluationBundle = {
-        "format_version": 1,
+        "format_version": 2,
+        "evaluation_kind": (
+            "reconstruction"
+            if isinstance(model, AutoencoderCollection)
+            else "prediction"
+        ),
         "value_scale": "physical",
         "model_filename": model_path.name,
         "model_sha256": model_hash,

@@ -74,14 +74,16 @@ def test_worker_exit_kills_child_but_preserves_unrelated_process(
 
         assert child_pid is not None, "Worker did not report its child PID."
 
-        child_handle = open_process(
+        opened_handle = open_process(
             win32con.SYNCHRONIZE | win32con.PROCESS_TERMINATE,
             False,
             child_pid,
         )
+        child_handle = opened_handle
+        child_handle_value: int = int(opened_handle)
 
         assert (
-            win32event.WaitForSingleObject(int(child_handle), 0)
+            win32event.WaitForSingleObject(child_handle_value, 0)
             == win32event.WAIT_TIMEOUT
         )
 
@@ -89,10 +91,11 @@ def test_worker_exit_kills_child_but_preserves_unrelated_process(
         worker.wait(timeout=5)
 
         assert (
-            win32event.WaitForSingleObject(int(child_handle), 5000)
+            win32event.WaitForSingleObject(child_handle_value, 5000)
             == win32event.WAIT_OBJECT_0
         )
 
+        assert unrelated is not None
         assert unrelated.poll() is None
 
     finally:
@@ -109,7 +112,10 @@ def test_worker_exit_kills_child_but_preserves_unrelated_process(
                             == win32event.WAIT_TIMEOUT
                         ):
                             win32api.TerminateProcess(int(child_handle), 1)
-                            win32event.WaitForSingleObject(int(child_handle), 5000)
+                            win32event.WaitForSingleObject(
+                                int(child_handle),
+                                5000,
+                            )
                     finally:
                         child_handle.close()
             finally:
