@@ -1,23 +1,14 @@
 import math
 from collections.abc import Generator
-from typing import Any, Literal, Protocol, cast
+from typing import Literal, Protocol, cast
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.optimize import linear_sum_assignment
 from scipy.stats import qmc
 
 from src.config.config_mcad_parameters import (
     AIRGAP,
-    LAMBDA_1_1,
-    LAMBDA_1_2,
-    LAMBDA_1_3,
-    LAMBDA_2_1,
-    LAMBDA_2_2,
-    LAMBDA_2_3,
-    LAMBDA_3_1,
-    LAMBDA_3_2,
-    LAMBDA_3_3,
+    LAMBDA_MIN_MAX,
     POLE_NUMBER,
     SLOT_NUMBER,
     STATOR_BORE,
@@ -49,63 +40,11 @@ class AFMMachineGenerator:
     def get_generator(self, _type: str) -> Generator[dict[str, float]]:
         match _type:
             case "v1":
-                return self._lambda_generator_v1()
+                raise ValueError("Type v1 is no longer supported")
             case "v2":
                 return self._lambda_generator_v2()
             case _:
                 raise ValueError(f"Unknown generator type: {_type}")
-
-    @staticmethod
-    def find_pole_slot_pairs() -> list[tuple[int, int]]:
-        pairs = []
-        for slot in range(SLOT_NUMBER[0], SLOT_NUMBER[1] + 1, 3):
-            for pole in range(POLE_NUMBER[0], POLE_NUMBER[1] + 1, 2):
-                gcd = math.gcd(slot, pole)
-                if slot % (3 * gcd) == 0 and slot > pole and slot / gcd <= 6:
-                    pairs.append((slot, pole))
-        return pairs
-
-    def _select_pole_slot_pairs(self, seed: int = 41) -> np.ndarray:
-        """Select well-spread [slot, pole] pairs from slots 3..30 and poles 2..20.
-
-        Match normalized LHS targets to distinct valid pairs at minimum total
-        squared distance. The discrete constraints only approximate an LHS.
-        """
-
-        num_pairs = self.num_base_designs
-        if num_pairs < 1:
-            raise ValueError("num_of_sub_designs must be >= 1")
-
-        pairs = self.find_pole_slot_pairs()
-
-        if num_pairs > len(pairs):
-            raise ValueError(
-                f"num_sub_designs must be <= {len(pairs)} "
-                "for slots 3..30 and poles 2..20"
-            )
-
-        pairs = np.array(pairs, dtype=int)
-        # Beide Achsen gleich gewichten, unabhängig von ihren Wertebereichen.
-        normalized_pairs = (pairs - np.array([3, 2])) / np.array([27, 18])
-        targets = self._sampling(
-            num_of_points=num_pairs,
-            d=2,
-            lower_bounds=np.zeros(2),
-            upper_bounds=np.ones(2),
-            seed=seed,
-        )
-
-        # Gemeinsame Zuordnung verhindert doppelte Paare beim Annähern der Ziele.
-        squared_distances = np.sum(
-            (targets[:, None, :] - normalized_pairs[None, :, :]) ** 2,
-            axis=2,
-        )
-        assignment: tuple[NDArray[np.intp], NDArray[np.intp]] = cast(
-            tuple[NDArray[np.intp], NDArray[np.intp]],
-            linear_sum_assignment(squared_distances),
-        )
-        _, selected_indices = assignment
-        return pairs[selected_indices]
 
     @staticmethod
     def _sampling(
@@ -129,139 +68,55 @@ class AFMMachineGenerator:
 
         return qmc.scale(samples, lower_bounds, upper_bounds)
 
-    def _get_lambda_values_v1(self) -> list[Any]:
-        seeds = [
-            42,
-            33,
-            11,
-        ]
-
-        lambda_min_max: np.ndarray = np.array(
-            [
-                [
-                    [LAMBDA_1_1[0], LAMBDA_1_2[0], LAMBDA_1_3[0]],
-                    [LAMBDA_2_1[0], LAMBDA_2_2[0], LAMBDA_2_3[0]],
-                    [LAMBDA_3_1[0], LAMBDA_3_2[0], LAMBDA_3_3[0]],
-                ],
-                [
-                    [LAMBDA_1_1[1], LAMBDA_1_2[1], LAMBDA_1_3[1]],
-                    [LAMBDA_2_1[1], LAMBDA_2_2[1], LAMBDA_2_3[1]],
-                    [LAMBDA_3_1[1], LAMBDA_3_2[1], LAMBDA_3_3[1]],
-                ],
-            ],
-            dtype=np.float64,
-        )
-
-        num_levels = lambda_min_max.shape[1]
-
-        lambdas: list[Any] = []
-        for level, seed in enumerate(seeds[:num_levels]):
-            lambdas.append(
-                self._sampling(
-                    num_of_points=self.num_lam_designs,
-                    d=3,
-                    lower_bounds=lambda_min_max[0, level],
-                    upper_bounds=lambda_min_max[1, level],
-                    seed=seed,
-                )
-            )
-
-        return lambdas
-
     def _get_lambda_values_v2(self) -> np.ndarray:
-        seeds = [
-            42,
-            33,
-            11,
-        ]
 
         lambda_min_max: np.ndarray = np.array(
-            [
-                [
-                    LAMBDA_1_1[0],
-                    LAMBDA_1_2[0],
-                    LAMBDA_1_3[0],
-                    LAMBDA_2_1[0],
-                    LAMBDA_2_2[0],
-                    LAMBDA_2_3[0],
-                    LAMBDA_3_1[0],
-                    LAMBDA_3_2[0],
-                    LAMBDA_3_3[0],
-                ],
-                [
-                    LAMBDA_1_1[1],
-                    LAMBDA_1_2[1],
-                    LAMBDA_1_3[1],
-                    LAMBDA_2_1[1],
-                    LAMBDA_2_2[1],
-                    LAMBDA_2_3[1],
-                    LAMBDA_3_1[1],
-                    LAMBDA_3_2[1],
-                    LAMBDA_3_3[1],
-                ],
-            ],
+            LAMBDA_MIN_MAX,
             dtype=np.float64,
         )
-
-        num_levels = lambda_min_max.shape[1]
+        mins = lambda_min_max[:, 0]
+        maxs = lambda_min_max[:, 1]
 
         lambdas: np.ndarray = self._sampling(
             num_of_points=self.num_lam_designs,
-            d=num_levels,
-            lower_bounds=lambda_min_max[0],
-            upper_bounds=lambda_min_max[1],
-            seed=seeds[0],
+            d=len(LAMBDA_MIN_MAX),
+            lower_bounds=mins,
+            upper_bounds=maxs,
+            seed=42,
         )
 
         return lambdas
 
-    def _get_samples(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        stator_bore_samples: np.ndarray = self._sampling(
-            num_of_points=self.num_base_designs,
-            d=1,
-            lower_bounds=np.array([STATOR_BORE[0]]),
-            upper_bounds=np.array([STATOR_BORE[1]]),
-            seed=68,
-        )
+    def _get_samples(self) -> tuple[np.ndarray, np.ndarray]:
 
-        airgap_samples: np.ndarray = self._sampling(
+        airgap_dsi_samples: np.ndarray = self._sampling(
             num_of_points=self.num_base_designs,
-            d=1,
-            lower_bounds=np.array([AIRGAP[0]]),
-            upper_bounds=np.array([AIRGAP[1]]),
+            d=2,
+            lower_bounds=np.array([AIRGAP[0], STATOR_BORE[0]]),
+            upper_bounds=np.array([AIRGAP[1], STATOR_BORE[1]]),
             seed=17,
         )
 
-        slot_pole_samples: np.ndarray = self._select_pole_slot_pairs()
-
         op_samples: np.ndarray = map_generator()
 
-        return stator_bore_samples, airgap_samples, slot_pole_samples, op_samples
+        return airgap_dsi_samples, op_samples
 
     @staticmethod
     def _calculate_geometric(
-        slot_sample: int,
-        pole_sample: int,
         airgap_sample: float,
         stator_bore_sample: float,
-        lambda_1_1: float,
-        lambda_1_2: float,
-        lambda_1_3: float,
-        lambda_2_1: float,
-        lambda_2_2: float,
-        lambda_2_3: float,
-        lambda_3_1: float,
-        lambda_3_2: float,
-        lambda_3_3: float,
-        shaft_speed: float,
+        lambdas: NDArray[np.float64],
+        shaft_speed_norm: float,
         q_current_density: float,
         d_current_density: float,
     ) -> dict[str, float]:
 
-        # radial: lambda_1_1 = D_Si / D_Sa
-        # tangential: lambda_1_2 = beta_PM / beta_p = 2 * Magnet_Arc_[ED] / 360
+        # radial: lambda_1 = D_Si / D_Sa
+
+        # tangential: lambda_2 = beta_PM / beta_p = 2 * Magnet_Arc_[ED] / 360
         #       beta_m = Magnet_Arc_[ED] / p ; beta_p = 360° / p
-        # axial: lambda_1_3 = l_PM / g;
+
+        # axial: lambda_3 = g / l_PM;
 
         # d_emb + h_PM < (D_Sa - D_Si) / 2
         # 2* (d_emb + h_PM) < D_Si * (1/lambda_1 - 1)
@@ -269,34 +124,41 @@ class AFMMachineGenerator:
 
         # tangential: lambda_2_1 = b_S / tau_s = s*b_S / pi*D_Si
         #   tau_s = pi * D_Si / s = pi * D_Si  / S
-        #   b_S = pi * lambda_2_1 * D_Si / s
-        # axial: lambda_2_2 = b_S / d_S
-        #       d_S = b_S / lambda_2_2 = pi * lambda_2_1 / lambda_2_2 * D_Si / s
-        # radial: lambda_2_3 = h_PM / (D_Sa - D_Si)/2
-        #   h_PM = lambda_2_3 * D_Si * (1/lambda_1_1 - 1) / 2
+        #   b_S = pi * lambda_4 * D_Si / s
 
-        # radial: lambda_3_1 = d_emb / ((D_Si*(1/lambda_1_1 -1)/2 - h_PM)
-        #   d_emb = lambda_3_1 * ((D_Si*(1/lambda_1_1 -1) - h_PM)
-        # tangential: lambda_3_2 = Dicke des magnetischen Rückflusses / tau_p
-        # = 2*p * (l_S - d_s) / (pi * D_Si * (1 + 1/lambda_1_1))
-        #         #   l_S = d_S + pi * lambda_3_2 * D_Si * (1+1/lambda_1_1) / 2*p
-        # axial: lambda_3_3 = l_PM / l_R
-        #   l_R =  l_PM / lambda_3_3
-        s = int(slot_sample)
-        p = int(pole_sample)
+        # axial: lambda_5 = b_S / d_S
+        #       d_S = b_S / lambda_5 = pi * lambda_4 / lambda_5 * D_Si / s
+
+        # radial: lambda_6 = h_PM / (D_Sa - D_Si)/2
+        #   h_PM = lambda_6 * D_Si * (1/lambda_1 - 1) / 2
+
+        # radial: lambda_7 = d_emb / ((D_Si*(1/lambda_1 -1)/2 - h_PM)
+        #   d_emb = lambda_7 * ((D_Si*(1/lambda_1 -1) - h_PM)
+
+        # tangential: lambda_8 = Dicke des magnetischen Rückflusses / tau_p
+        # = 2*p * (l_S - d_s) / (pi * D_Si * (1 + 1/lambda_1))
+        #         #   l_S = d_S + pi * lambda_8 * D_Si * (1+1/lambda_1) / 2*p
+
+        # axial: lambda_9 = l_PM / l_R
+        #   l_R =  l_PM / lambda_9
+
+        #shaft_speed_norm = shaft_speed / d_sa
+
+        s = SLOT_NUMBER
+        p = POLE_NUMBER
         g = airgap_sample
         d_si = stator_bore_sample
-        d_sa = d_si / lambda_1_1
-        beta_pm = lambda_1_2 * 360 / 2
-        l_pm = g / lambda_1_3
-        b_s = lambda_2_1 * math.pi * d_si / s
-        t_s = b_s / lambda_2_2
+        d_sa = d_si / lambdas[0]
+        beta_pm = lambdas[1] * 360 / 2
+        l_pm = g / lambdas[2]
+        b_s = lambdas[3] * math.pi * d_si / s
+        t_s = b_s / lambdas[4]
         b_tto = 0.8 * b_s
-        h_pm = lambda_2_3 * (d_sa - d_si) / 2
-        d_emb = lambda_3_1 * ((d_sa - d_si) / 2 - h_pm)
-        l_r = l_pm / lambda_3_3
+        h_pm = lambdas[5] * (d_sa - d_si) / 2
+        d_emb = lambdas[6] * ((d_sa - d_si) / 2 - h_pm)
         d_mean = (d_sa + d_si) / 2
-        l_s = t_s + lambda_3_2 * math.pi * d_mean / p
+        l_s = t_s + lambdas[7] * math.pi * d_mean / p
+        l_r = l_pm / lambdas[8]
 
         return {
             "Slot_Number": s,
@@ -316,98 +178,26 @@ class AFMMachineGenerator:
             "Stator_Lam_Length": l_s,
             "Motor_Length": 2 * (g + l_s + l_pm) + l_r,
             "RMSCurrentDensity": math.sqrt(q_current_density**2 + d_current_density**2),
-            "ShaftSpeed": shaft_speed,
+            "ShaftSpeed": shaft_speed_norm * d_sa,
             "PhaseAdvance": math.degrees(
                 math.atan2(-d_current_density, q_current_density)
             ),
         }
 
-    def _lambda_generator_v1(self) -> Generator[dict[str, float]]:
-
-        ##structure
-        #   for lambda_1 in lambdas_1:
-        #       for lambda_2 in lambdas_2:
-        #           for lambda_3 in lambdas_3:
-        #               for op in ops:
-        #                   yield geometrical design at op
-        #
-        # v1: Anzahl der Betriebspunkte
-        # = num_base_designs * num_lam_designs**3 * num_operation_points**3
-        lambdas = self._get_lambda_values_v1()
-        stator_bore_samples, airgap_samples, slot_pole_samples, op_samples = (
-            self._get_samples()
-        )
-
-        for (
-            (airgap_sample,),
-            (slot_sample, pole_sample),
-            (stator_bore_sample,),
-        ) in zip(airgap_samples, slot_pole_samples, stator_bore_samples):
-            for lambda_1_1, lambda_1_2, lambda_1_3 in lambdas[0]:
-                for lambda_2_1, lambda_2_2, lambda_2_3 in lambdas[1]:
-                    for lambda_3_1, lambda_3_2, lambda_3_3 in lambdas[2]:
-                        for (
-                            shaft_speed,
-                            q_current_density,
-                            d_current_density,
-                        ) in op_samples:
-                            yield self._calculate_geometric(
-                                slot_sample,
-                                pole_sample,
-                                airgap_sample,
-                                stator_bore_sample,
-                                lambda_1_1,
-                                lambda_1_2,
-                                lambda_1_3,
-                                lambda_2_1,
-                                lambda_2_2,
-                                lambda_2_3,
-                                lambda_3_1,
-                                lambda_3_2,
-                                lambda_3_3,
-                                shaft_speed,
-                                q_current_density,
-                                d_current_density,
-                            )
-
     def _lambda_generator_v2(self) -> Generator[dict[str, float]]:
         lambdas = self._get_lambda_values_v2()
-        stator_bore_samples, airgap_samples, slot_pole_samples, op_samples = (
+        airgap_dsi_samples, op_samples = (
             self._get_samples()
         )
 
-        for (airgap_sample,), (slot_sample, pole_sample), (stator_bore_sample,) in zip(
-            airgap_samples,
-            slot_pole_samples,
-            stator_bore_samples,
-        ):
-            for (
-                lambda_1_1,
-                lambda_1_2,
-                lambda_1_3,
-                lambda_2_1,
-                lambda_2_2,
-                lambda_2_3,
-                lambda_3_1,
-                lambda_3_2,
-                lambda_3_3,
-            ) in lambdas:
-                for shaft_speed, q_current_density, d_current_density in op_samples:
+        for airgap_sample, stator_bore_sample in airgap_dsi_samples:
+            for lambda_set in lambdas:
+                for shaft_speed_norm, q_current_density, d_current_density in op_samples:
                     yield self._calculate_geometric(
-                        slot_sample,
-                        pole_sample,
                         airgap_sample,
                         stator_bore_sample,
-                        lambda_1_1,
-                        lambda_1_2,
-                        lambda_1_3,
-                        lambda_2_1,
-                        lambda_2_2,
-                        lambda_2_3,
-                        lambda_3_1,
-                        lambda_3_2,
-                        lambda_3_3,
-                        shaft_speed,
+                        lambda_set,
+                        shaft_speed_norm,
                         q_current_density,
                         d_current_density,
                     )

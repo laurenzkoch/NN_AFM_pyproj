@@ -57,15 +57,6 @@ class MyUserInterface:
             overall_bar.pack(pady=5)
             self.overall_progressbar = overall_bar
 
-            self.overall_progressbar = ttk.Progressbar(
-                self.root,
-                orient="horizontal",
-                length=350,
-                mode="determinate",
-                maximum=overall_max_value,
-            )
-            self.overall_progressbar.pack(pady=5)
-
         # Messwert
         self.value_label = ttk.Label(
             self.root, text=f"Progress: 0 from {max_value}", font=("Arial", 14)

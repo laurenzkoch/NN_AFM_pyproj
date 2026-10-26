@@ -2,7 +2,8 @@ NN_AFM_pyproj
 =============
 
 Automatisierte Motor-CAD-Simulationen und Surrogatmodelle für Axialflussmaschinen
-Dokumentationsstand: 20.10.2026
+Konfiguration und zugehörige Abläufe abgeglichen: 26.10.2026
+Übrige Abschnitte und Bestandsangaben: Stand 20.10.2026
 
 Das Projekt erzeugt Maschinengeometrien und Betriebspunktkennfelder, berechnet
 sie mit Ansys Motor-CAD und speichert erfolgreiche Ergebnisse als CSV. Aus
@@ -36,9 +37,10 @@ main_adopt_legacy_csv.py übernimmt den im Skript konfigurierten CSV-Stand als
 Cache-Quelle. main_plot_results.py erzeugt Diagramme und Bericht erneut aus
 gespeicherten Auswertungsdaten.
 
-Diese README wurde statisch mit dem aktuellen Quellcode und Dateibestand
-abgeglichen. Simulation, Training, Datenübernahme und Tests wurden dafür nicht
-gestartet. Vorhandene Laufartefakte sind in Abschnitt 7 beschrieben.
+Die aktuelle Überarbeitung gleicht config_mcad_parameters.py und die zugehörigen
+Generator-/Datenladefunktionen statisch ab. Simulation, Training, Datenübernahme
+und Tests wurden dafür nicht gestartet. Offene Anpassungen dieser Umstellung
+stehen in Abschnitt 9. Vorhandene Laufartefakte sind in Abschnitt 7 beschrieben.
 
 
 1. Projektstruktur
@@ -125,7 +127,7 @@ Das Python-Paket tzdata liefert unter Windows die Daten für zoneinfo.
 Pakete und Aufgaben:
 
     numpy, pandas          Numerik, CSV-Verarbeitung und Tensorvorbereitung
-    scipy                  Latin-Hypercube-Sampling und Nut-/Polpaar-Zuordnung
+    scipy                  Latin-Hypercube-Sampling der Geometrieparameter
     torch                  MLP, Autoencoder, CPU-Training und Tensoren
     optuna                 Architektur-Suche und persistente SQLite-Studie
     ansys-motorcad-core    Motor-CAD-Schnittstelle
@@ -198,23 +200,33 @@ src/config/config_mcad_parameters.py legt CSV-Spalten, MACHINE_DEFINITION,
 AXIS_LIST, MAP_SIZE, DEFAULT_VALUES und die Samplingbereiche fest:
 
     MAP_SIZE              (5, 5, 5), also 125 Betriebspunkte je Geometrie
-    SLOT_NUMBER           3 ... 30, Kandidaten in Schritten von 3
-    POLE_NUMBER           2 ... 20, Kandidaten in Schritten von 2
-    AIRGAP                0,25 ... 5
+    SLOT_NUMBER           18, fest
+    POLE_NUMBER           12, fest
+    AIRGAP                0,75 ... 3
     STATOR_BORE            11 ... 100
-    SHAFT_SPEED            1 ... 5000
-    D_CURRENT_DENSITY      -50 ... 0
-    Q_CURRENT_DENSITY      5 ... 100
+    SHAFT_SPEED_NORM       0,1 ... 1
+    D_CURRENT_DENSITY      -10 ... 0
+    Q_CURRENT_DENSITY      1 ... 25
 
-    LAMBDA_1_1            0,2 ... 0,8
-    LAMBDA_1_2            0,5 ... 0,9
-    LAMBDA_1_3            0,2 ... 1,0
-    LAMBDA_2_1            0,3 ... 0,7
-    LAMBDA_2_2            0,1 ... 1,0
-    LAMBDA_2_3            0,6 ... 1,0
-    LAMBDA_3_1            0,0 ... 0,95
-    LAMBDA_3_2            0,1 ... 0,4
-    LAMBDA_3_3            0,2 ... 1,0
+LAMBDA_MIN_MAX enthält neun (Minimum, Maximum)-Paare in LAMBDA_LIST-Reihenfolge.
+Einzelkonstanten wie LAMBDA_1_1 sind entfallen. Zuordnung zu den bisherigen Namen:
+
+    Merkmal     Bisher         Bereich
+    lambda_1    lambda_1_1     0,2 ... 0,8
+    lambda_2    lambda_1_2     0,5 ... 0,9
+    lambda_3    lambda_1_3     0,2 ... 1,0
+    lambda_4    lambda_2_1     0,3 ... 0,7
+    lambda_5    lambda_2_2     0,1 ... 1,0
+    lambda_6    lambda_2_3     0,6 ... 1,0
+    lambda_7    lambda_3_1     0,0 ... 0,95
+    lambda_8    lambda_3_2     0,1 ... 0,4
+    lambda_9    lambda_3_3     0,2 ... 1,0
+
+Die Drehzahlachse ist jetzt Shaft_Speed_norm = ShaftSpeed / Stator_Lam_Dia.
+Der Generator setzt ShaftSpeed = Shaft_Speed_norm * Stator_Lam_Dia; die absolute
+Drehzahl hängt damit von der Geometrie ab. In der CSV bleibt ShaftSpeed erhalten.
+Die Normierung ist ein Quotient aus Drehzahl und Durchmesser in den verwendeten
+Motor-CAD-Einheiten und keine dimensionslose Skalierung auf eine Nenndrehzahl.
 
 Die neun Lambda-Werte beschreiben Geometrieverhältnisse. Maßgeblich sind die
 Berechnung in AFMMachineGenerator._calculate_geometric und die Rekonstruktion
@@ -249,8 +261,9 @@ Aktueller SimulationPipeline-Aufruf:
 SimulationPipeline baut aus den Kombinationen SimulationJob-Objekte auf.
 SimulationSeries berechnet die Aufträge nacheinander; jede Kombination erhält
 eine eigene Ergebnis-CSV. Die Liste darf nicht leer sein und muss aus eindeutigen
-(B, L)-Tupeln mit positiven ganzen Zahlen bestehen. B darf die Zahl verfügbarer
-Nut-/Polpaare nicht übersteigen.
+(B, L)-Tupeln mit positiven ganzen Zahlen bestehen. B bezeichnet jetzt die Anzahl
+der gesampelten Luftspalt-/Statorbohrungs-Kombinationen bei festen Pol-/Nutzahlen;
+die frühere Begrenzung durch verfügbare Nut-/Polpaare entfällt.
 
 MAP_SIZE wird zentral konfiguriert. num_workers wird auf verfügbare CPUs und je
 Auftrag auf die Punktzahl begrenzt. Eine Batch umfasst Workerzahl * 125 Punkte.
@@ -260,15 +273,17 @@ temporäre Kopie des Basismodells in Motor-CAD.
 B = num_base_designs, L = num_lam_designs, P = Produkt der MAP_SIZE-Werte:
 
     Variante    Geometrien      Vorgesehene Betriebspunkte
-    v1          B * L^3         B * L^3 * P
-    v2          B * L           B * L   * P
+    v2          B * L           B * L * P
 
-v1 kombiniert drei gesampelte Lambda-Gruppen. v2 sampelt alle neun Lambda-Werte
-gemeinsam. Beide verwenden Latin-Hypercube-Sampling mit festen Seeds. Nut-/Polpaare
-werden aus zulässigen Kombinationen gewählt und gemeinsam den Samplingzielen
-zugeordnet. Das Betriebspunktkennfeld ist ein äquidistantes kartesisches Raster.
-Die aktuelle v2-Startkonfiguration umfasst 116 Aufträge mit zusammen
-16.856.250 generierten Anforderungen vor Wiederverwendung und Verwerfung.
+Der Maschinengenerator unterstützt nur noch v2; v1 löst einen ValueError aus.
+Die Punktzählung in SimulationPipeline enthält noch den alten v1-Zweig, daraus
+folgt keine Unterstützung im Generator. v2 soll alle neun Lambda-Werte gemeinsam
+per Latin-Hypercube-Sampling mit Seed 42 sampeln. Luftspalt und Statorbohrung
+werden gemeinsam mit Seed 17 gesampelt. Die offene Dimensionsanpassung des
+Lambda-Samplings ist in Abschnitt 9 beschrieben.
+Das Betriebspunktkennfeld ist ein äquidistantes kartesisches Raster aus normierter
+Drehzahl sowie d-/q-Stromdichte. Die aktuelle v2-Startkonfiguration plant 116
+Aufträge mit zusammen 16.856.250 Anforderungen vor Wiederverwendung und Verwerfung.
 Es werden 134.850 Geometrien angefordert; der erste Auftrag umfasst 1.250 Punkte,
 der letzte 543.750. Bei gleichen bekannten Punkten können Ergebnisse kopiert
 oder wiederverwendet werden. Den Umfang vor einem Start in main_mcad_sim.py prüfen.
@@ -297,7 +312,7 @@ CSV-Ausgabe und Wiederverwendung
 
 Die Zieldatei erhält standardmäßig den Namen:
 
-    Results_EMagnetic_simulation_<B>_<L>_<MAP_SIZE[0]>_GenType-<v1|v2>_<Datum_Zeit_Zone>_<Lauf-ID>.csv
+    Results_EMagnetic_simulation_<B>_<L>_<MAP_SIZE[0]>_GenType-v2_<Datum_Zeit_Zone>_<Lauf-ID>.csv
 
 Optional legt csv_paths genau einen Zielpfad je Kombination fest. Relative Pfade
 werden unter data/MCAD_Results aufgelöst; absolute Pfade sind ebenfalls möglich.
@@ -419,7 +434,7 @@ CSV_PARAMETERS umfasst 29 Spalten in dieser Reihenfolge:
     ShaftTorque, SystemEfficiency, BMean_AirGap, ConductorLoss,
     MagnetLoss, StatorIronLoss_Total, RotorIronLoss_Total
 
-Direkt in data/Training_data liegen am Dokumentationsdatum:
+Direkt in data/Training_data lagen beim Bestandsabgleich am 20.10.2026:
 
     Dateiname                                                               Datenzeilen
     Results_EMagnetic_simulation_1_10_5_GenType-v2_04.10.2026_19-31-19_CEST.csv     1.250
@@ -495,26 +510,34 @@ DataLoader prüft das CSV-Schema sowie endliche Quellwerte. PeakCurrent,
 RMSCurrentDensity, Stator_Bore, Stator_Lam_Dia, Magnet_Length, Slot_Depth und
 Rotor_Lam_Length müssen positiv sein. Radiale Breite und radiale Breite abzüglich
 Magnet_Thickness müssen ebenfalls positiv sein. Daraus werden Leiterfläche,
-d-/q-Stromdichten und die neun Lambda-Verhältnisse berechnet.
+normierte Drehzahl, d-/q-Stromdichten und die neun Lambda-Verhältnisse berechnet.
 
 MACHINE_DEFINITION legt die 13 Geometriemerkmale in dieser Reihenfolge fest:
 
     Slot_Number, Pole_Number, Airgap, Stator_Bore,
-    lambda_1_1, lambda_1_2, lambda_1_3,
-    lambda_2_1, lambda_2_2, lambda_2_3,
-    lambda_3_1, lambda_3_2, lambda_3_3
+    lambda_1, lambda_2, lambda_3, lambda_4, lambda_5,
+    lambda_6, lambda_7, lambda_8, lambda_9
 
 Kennfeldachsen in AXIS_LIST:
 
-    ShaftSpeed, RMSPhaseCurrent_D_density, RMSPhaseCurrent_Q_density
+    Shaft_Speed_norm, RMSPhaseCurrent_D_density, RMSPhaseCurrent_Q_density
 
-Das Referenzraster stammt aus MAP_SIZE und den konfigurierten Drehzahl-/
-Stromdichtebereichen. Rekonstruierte Stromdichten werden nicht mehr pauschal auf
-0,05 gerundet. _align_current_density_grid() prüft, ob die CSV-Rundung auf vier
+Das Referenzraster des DataLoaders verwendet MAP_SIZE in der Reihenfolge
+(normierte Drehzahl, d-Stromdichte, q-Stromdichte). Die aktuellen Stützstellen sind:
+
+    Shaft_Speed_norm             0,1; 0,325; 0,55; 0,775; 1,0
+    RMSPhaseCurrent_D_density    -10; -7,5; -5; -2,5; 0
+    RMSPhaseCurrent_Q_density    1; 7; 13; 19; 25
+
+Die Stromdichte-Referenzachsen werden auf 0,05 gerundet; rekonstruierte
+Stromdichten werden nicht pauschal so gerundet. _align_current_density_grid()
+prüft, ob die CSV-Rundung auf vier
 Nachkommastellen die Abweichung von einem Rasterwert erklären kann: Aus den
 Rundungsintervallen von Phasenstrom, Stromdichte und Spitzenstrom wird ein
 möglicher Wertebereich bestimmt. Nur bei genau einem passenden Referenzwert
 wird der Wert diesem Rasterpunkt zugeordnet. Andere Abweichungen bleiben bestehen.
+_align_speed_grid() bietet einen entsprechenden Abgleich aus ShaftSpeed und
+Stator_Lam_Dia, wird von load() aktuell jedoch noch nicht aufgerufen.
 
 Jede Maschine muss das vollständige kartesische Referenzraster besitzen. Doppelte
 Punkte sowie fehlende oder zusätzliche Achsenkombinationen entfernen die ganze
@@ -536,8 +559,10 @@ Diese Prüfung erkennt exakte Identität, keine geometrische Ähnlichkeit.
 
 Normalisierung:
 
-- Die vier Grundmerkmale werden mit GEO_PARAMETERS_MIN_MAX_DICT skaliert:
-  (Wert - Minimum) / (Maximum - Minimum).
+- _normalize_geo_tensor() erwartet für die vier Grundmerkmale Wertepaare in
+  GEO_PARAMETERS_MIN_MAX_DICT und berechnet (Wert - Minimum) / (Maximum - Minimum).
+  Die festen Ganzzahlen für Slot_Number und Pole_Number sind damit aktuell noch
+  nicht kompatibel; siehe Abschnitt 9.
 - Die neun Lambda-Verhältnisse bleiben unverändert.
 - Kennfelder werden je Kanal mit Minimum und Maximum ausschließlich der
   Trainingsdaten skaliert. Validierung und Test verwenden dieselben Werte.
@@ -764,6 +789,20 @@ Der frühere Einzeltest check_logging.py ist entfernt; Loggingtests liegen in te
 9. Fehlerbehebung und aktuelle Grenzen
 --------------------------------------
 
+Offene Anpassungen der Konfigurationsumstellung vom 26.10.2026
+    _get_lambda_values_v2() verwendet LAMBDA_MIN_MAX als Array der Form (9, 2),
+    setzt die Samplingdimension aber noch auf shape[1], also 2 statt 9. Die neun
+    Grenzen passen deshalb nicht zu den erzeugten zweidimensionalen Samples.
+    _normalize_geo_tensor() entpackt jeden Eintrag in GEO_PARAMETERS_MIN_MAX_DICT
+    als (Minimum, Maximum); die festen Ganzzahlen 18 und 12 führen dabei zu einem
+    TypeError. _align_speed_grid() ist implementiert, fehlt aber im load()-Ablauf;
+    CSV-Rundungen können dadurch vollständige Kennfelder als rasterfremd verwerfen.
+    Außerdem verwendet map_generator() MAP_SIZE als (Drehzahl, q, d), der
+    DataLoader als (Drehzahl, d, q). Bei (5,5,5) haben beide dasselbe Raster;
+    bei unterschiedlichen d-/q-Achsengrößen passen die Raster nicht zusammen.
+    Diese Punkte wurden statisch festgestellt und bei der README-Aktualisierung
+    nicht im Quellcode geändert oder durch Ausführung geprüft.
+
 Fehlendes Argument --csv / FileNotFoundError
     Einen .csv-Dateinamen direkt unter Training_data angeben. Hauptquelle und
     automatisch geloggte Testauswahl prüfen. Das Skript durchsucht keine
@@ -772,8 +811,11 @@ Fehlendes Argument --csv / FileNotFoundError
 Fehlende CSV-Spalten / No complete reference-grid maps
     Auch jede automatisch gewählte Testquelle prüfen. Leere Dateien oder
     Dateien ohne vollständige Referenzkennfelder werden nicht übersprungen.
-    MAP_SIZE, Achsen und Schema müssen passen. Die Stromdichtezuordnung
-    korrigiert nur eindeutig durch CSV-Rundung erklärbare Abweichungen.
+    MAP_SIZE, Achsen und Schema müssen passen. Frühere CSVs mit absolutem
+    Drehzahlraster und alten Stromdichtebereichen erfüllen das neue Referenzraster
+    nicht automatisch. Die Stromdichtezuordnung korrigiert nur eindeutig durch
+    CSV-Rundung erklärbare Abweichungen; der Drehzahlabgleich wird noch nicht
+    aufgerufen.
 
 Overlapping machines / Duplicate machines between external test sources
     Den Trainingsordner auf unabhängige CSV-Quellen beschränken. Umbenennen

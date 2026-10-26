@@ -279,18 +279,11 @@ class SimulationPipeline(MyPipeline):
         if not combinations:
             raise ValueError("At least one combination is required.")
 
-        available_pairs = len(AFMMachineGenerator.find_pole_slot_pairs())
-
         for pair in combinations:
             if not isinstance(pair, tuple) or len(pair) != 2:
                 raise ValueError("Each combination must be a tuple (B, L).")
 
             self._count_points(pair[0], pair[1], gen_type)
-
-            if pair[0] > available_pairs:
-                raise ValueError(
-                    f"A maximum of {available_pairs} basic designs are possible."
-                )
 
         if len(set(combinations)) != len(combinations):
             raise ValueError("Duplicate combinations are not permitted.")

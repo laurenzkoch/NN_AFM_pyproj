@@ -5,17 +5,17 @@ from src.config.config_mcad_parameters import (
     D_CURRENT_DENSITY,
     MAP_SIZE,
     Q_CURRENT_DENSITY,
-    SHAFT_SPEED,
+    SHAFT_SPEED_NORM,
 )
 
 
 def map_generator(
-    i_min_max: tuple[float, float] = SHAFT_SPEED,
+    i_min_max: tuple[float, float] = SHAFT_SPEED_NORM,
     j_min_max: tuple[float, float] = Q_CURRENT_DENSITY,
     k_min_max: tuple[float, float] = D_CURRENT_DENSITY,
     map_size: tuple[int, int, int] = MAP_SIZE,
 ) -> NDArray[np.float32]:
-    """Generate columns (speed, q, d) using sizes (speed, d, q)."""
+
     if len(map_size) != 3:
         raise ValueError("map_size must contain exactly three axis sizes.")
 
@@ -25,8 +25,8 @@ def map_generator(
     values: list[list[float]] = []
 
     for speed in np.linspace(*i_min_max, map_size[0], dtype=float):
-        for q_current in np.linspace(*j_min_max, map_size[2], dtype=float):
-            for d_current in np.linspace(*k_min_max, map_size[1], dtype=float):
+        for q_current in np.linspace(*j_min_max, map_size[1], dtype=float):
+            for d_current in np.linspace(*k_min_max, map_size[2], dtype=float):
                 values.append(
                     [
                         float(speed),

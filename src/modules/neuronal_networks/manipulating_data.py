@@ -23,7 +23,7 @@ from src.config.config_mcad_parameters import (
     MAP_SIZE,
     OUTPUT_NEURON_LIST,
     Q_CURRENT_DENSITY,
-    SHAFT_SPEED,
+    SHAFT_SPEED_NORM,
 )
 from src.modules.data_managment.csv_io import import_data_from_csv
 from src.modules.data_managment.experiment_utils import (
@@ -93,7 +93,7 @@ class DataLoader:
 
         self.map_axes: dict[str, NDArray[np.float64]] = {
             AXIS_LIST[0]: np.asarray(
-                np.linspace(*SHAFT_SPEED, MAP_SIZE[0]),
+                np.linspace(*SHAFT_SPEED_NORM, MAP_SIZE[0]),
                 dtype=np.float64,
             ),
             AXIS_LIST[1]: np.asarray(
@@ -264,13 +264,14 @@ class DataLoader:
         if bool((remaining_width <= 0).any()):
             raise ValueError("Radial width minus magnet thickness must be positive.")
 
-        conductor_area = df["PeakCurrent"] / (np.sqrt(2) * df["RMSCurrentDensity"])
-        df[AXIS_LIST[1]] = df["RMSPhaseCurrent_D"] / conductor_area
-        df[AXIS_LIST[2]] = df["RMSPhaseCurrent_Q"] / conductor_area
-
         d_si = df["Stator_Bore"]
         d_sa = df["Stator_Lam_Dia"]
         radial_width = (d_sa - d_si) / 2
+        conductor_area = df["PeakCurrent"] / (np.sqrt(2) * df["RMSCurrentDensity"])
+
+        df[AXIS_LIST[0]] = df["ShaftSpeed"] / d_sa
+        df[AXIS_LIST[1]] = df["RMSPhaseCurrent_D"] / conductor_area
+        df[AXIS_LIST[2]] = df["RMSPhaseCurrent_Q"] / conductor_area
 
         df[LAMBDA_LIST[0]] = d_si / d_sa
         df[LAMBDA_LIST[1]] = df["Magnet_Arc_[ED]"] / 180
@@ -301,68 +302,107 @@ class DataLoader:
         _machines = df.groupby(MACHINE_DEFINITION, sort=False)
         return _machines
 
-    def _align_current_density_grid(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Align densities when four-decimal CSV rounding explains the error."""
-        half_resolution: float = 0.00005
+    def _align_axis_grid(
+        self,
+        df: pd.DataFrame,
+        axis_name: str,
+        possible_values: NDArray[np.float64],
+        positions: NDArray[np.intp],
+    ) -> None:
+        """Assign exact grid values where rounding allows one unique match."""
         numerical_tolerance: float = 1e-10
 
+        # First dimension: CSV rows; remaining dimensions: rounding cases.
+        bounds: NDArray[np.float64] = possible_values.reshape(
+            positions.size,
+            -1,
+        )
+        lower = bounds.min(axis=1)
+        upper = bounds.max(axis=1)
+
+        axis: NDArray[np.float64] = self.map_axes[axis_name]
+        candidates = (axis[None, :] >= lower[:, None] - numerical_tolerance) & (
+            axis[None, :] <= upper[:, None] + numerical_tolerance
+        )
+        unique = candidates.sum(axis=1) == 1
+
+        aligned: NDArray[np.float64] = df[axis_name].to_numpy(
+            dtype=np.float64,
+            copy=True,
+        )
+        aligned[positions[unique]] = axis[candidates[unique].argmax(axis=1)]
+        df[axis_name] = aligned
+
+    def _align_speed_grid(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculate normalized-speed bounds from four-decimal rounding."""
+        half_resolution: float = 0.00005
         offsets: NDArray[np.float64] = np.array(
             [-half_resolution, half_resolution],
             dtype=np.float64,
         )
-        peak_current: NDArray[np.float64] = df["PeakCurrent"].to_numpy(
-            dtype=np.float64,
+
+        speed = df["ShaftSpeed"].to_numpy(dtype=np.float64)
+        diameter = df["Stator_Lam_Dia"].to_numpy(dtype=np.float64)
+
+        if bool((diameter <= half_resolution).any()):
+            raise ValueError("Diameter is too small for speed-grid alignment.")
+
+        if df.empty:
+            return df
+
+        speed_bounds = speed[:, None] + offsets
+        diameter_bounds = diameter[:, None] + offsets
+
+        possible_values = speed_bounds[:, :, None] / diameter_bounds[:, None, :]
+
+        self._align_axis_grid(
+            df=df,
+            axis_name=AXIS_LIST[0],
+            possible_values=possible_values,
+            positions=np.arange(len(df), dtype=np.intp),
         )
-        density: NDArray[np.float64] = df["RMSCurrentDensity"].to_numpy(
+        return df
+
+    def _align_current_density_grid(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculate current-density bounds from four-decimal rounding."""
+        half_resolution: float = 0.00005
+        offsets: NDArray[np.float64] = np.array(
+            [-half_resolution, half_resolution],
             dtype=np.float64,
         )
 
-        # Avoid intervals containing zero in the denominator.
-        usable: NDArray[np.bool_] = (peak_current > half_resolution) & (
-            density > half_resolution
-        )
+        peak_current = df["PeakCurrent"].to_numpy(dtype=np.float64)
+        density = df["RMSCurrentDensity"].to_numpy(dtype=np.float64)
 
-        peak_bounds: NDArray[np.float64] = peak_current[usable, None] + offsets
-        density_bounds: NDArray[np.float64] = density[usable, None] + offsets
+        usable = (peak_current > half_resolution) & (density > half_resolution)
+        positions: NDArray[np.intp] = np.flatnonzero(usable)
+
+        if positions.size == 0:
+            return df
+
+        peak_bounds = peak_current[usable, None] + offsets
+        density_bounds = density[usable, None] + offsets
 
         for axis_name, current_name in (
             (AXIS_LIST[1], "RMSPhaseCurrent_D"),
             (AXIS_LIST[2], "RMSPhaseCurrent_Q"),
         ):
-            current: NDArray[np.float64] = df[current_name].to_numpy(
-                dtype=np.float64,
-            )
-            current_bounds: NDArray[np.float64] = current[usable, None] + offsets
+            current = df[current_name].to_numpy(dtype=np.float64)
+            current_bounds = current[usable, None] + offsets
 
-            # Evaluate all eight combinations of the rounding bounds.
-            possible_values: NDArray[np.float64] = (
+            possible_values = (
                 np.sqrt(2.0)
                 * current_bounds[:, :, None, None]
                 * density_bounds[:, None, :, None]
                 / peak_bounds[:, None, None, :]
             )
-            lower: NDArray[np.float64] = possible_values.min(
-                axis=(1, 2, 3),
-            )
-            upper: NDArray[np.float64] = possible_values.max(
-                axis=(1, 2, 3),
-            )
-            axis: NDArray[np.float64] = self.map_axes[axis_name]
 
-            candidates: NDArray[np.bool_] = (
-                axis[None, :] >= lower[:, None] - numerical_tolerance
-            ) & (axis[None, :] <= upper[:, None] + numerical_tolerance)
-            unique: NDArray[np.bool_] = candidates.sum(axis=1) == 1
-
-            aligned: NDArray[np.float64] = df[axis_name].to_numpy(
-                dtype=np.float64,
-                copy=True,
+            self._align_axis_grid(
+                df=df,
+                axis_name=axis_name,
+                possible_values=possible_values,
+                positions=positions,
             )
-            usable_positions: NDArray[np.intp] = np.flatnonzero(usable)
-            matched_positions: NDArray[np.intp] = usable_positions[unique]
-
-            aligned[matched_positions] = axis[candidates[unique].argmax(axis=1)]
-            df[axis_name] = aligned
 
         return df
 
