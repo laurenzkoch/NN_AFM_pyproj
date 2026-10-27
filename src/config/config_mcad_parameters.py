@@ -1,6 +1,9 @@
 D_CURRENT_DENSITY: tuple[float, float] = (-10, 0)
 Q_CURRENT_DENSITY: tuple[float, float] = (1, 25)
-SHAFT_SPEED_NORM: tuple[float, float] = (0.1, 1) #shaft_speed_norm = shaft_speed / d_sa
+SHAFT_SPEED_NORM: tuple[float, float] = (
+    0.1,
+    1,
+)  # shaft_speed_norm = shaft_speed / d_sa
 MAP_SIZE: tuple[int, int, int] = (5, 5, 5)
 
 POLE_NUMBER: int = 12
@@ -9,32 +12,36 @@ AIRGAP: tuple[float, float] = (0.75, 3)
 STATOR_BORE: tuple[float, float] = (11, 100)
 
 GEO_PARAMETERS_MIN_MAX_DICT = {
-    "Slot_Number": SLOT_NUMBER,
-    "Pole_Number": POLE_NUMBER,
     "Airgap": AIRGAP,
     "Stator_Bore": STATOR_BORE,
 }
 
 LAMBDA_MIN_MAX: list[tuple[float, float]] = [
-    # radial:       lambda_1_1 = D_Si / D_Sa
+    # radial:       lambda_1 = D_Si / D_Sa
     (0.2, 0.8),
-    # tangential:   lambda_1_2 = beta_PM / beta_p = 2 * Magnet_Arc_[ED] / 360
+    # tangential:   lambda_2 = beta_PM / beta_p = 2 * Magnet_Arc_[ED] / 360
     (0.5, 0.9),
-    # axial:        lambda_1_3 = g / l_PM
+    # axial:        lambda_3 = g / l_PM
     (0.2, 1.0),
-    # tangential:   lambda_2_1 = b_S / tau_s = s*b_S / pi*D_Si
+    # tangential:   lambda_4 = b_S / tau_s = s*b_S / pi*D_Si
     (0.3, 0.7),
-    # axial:        lambda_2_2 = b_S / d_S
+    # axial:        lambda_5 = b_S / d_S
     (0.1, 1.0),
-    # radial:       lambda_2_3 = h_PM / (D_Sa - D_Si)/2
+    # radial:       lambda_6 = h_PM / (D_Sa - D_Si)/2
     (0.6, 1.0),
-    # radial:       lambda_3_1 = d_emb / ((D_Sa - D_Si)/2 - h_PM)
+    # radial:       lambda_7 = d_emb / ((D_Sa - D_Si)/2 - h_PM)
     (0.0, 0.95),
-    # tangential: lambda_3_2 = Dicke des magnetischen Rückflusses / tau_p
-    # = 2*p * (l_S - d_s) / (pi * D_Si * (1 + 1/lambda_1_1))
+    # tangential:   lambda_8 = Dicke des magnetischen Rückflusses / tau_p
+    # = 2*p * (l_S - d_s) / (pi * D_Si * (1 + 1/lambda_1))
     (0.1, 0.4),
-    # axial:        lambda_3_3 = l_PM / l_R
+    # axial:        lambda_9 = l_PM / l_R
     (0.2, 1.0),
+    # lambda_10 = b_tto / b_S
+    (0.1, 1.0),
+    # lambda_11 = d_ttd / d_S
+    (0.0, 0.3),
+    #lambda_12 = r_s / (b_S/2)
+    (0.0, 1.0),
 ]
 
 
@@ -48,13 +55,23 @@ SIM_IN_GEO_PARAMETERS = [
     "Magnet_Arc_[ED]",
     "Magnet_Length",
     "Magnet_Thickness",
+    "CircumferentialSegments",
     "Slot_Depth",
     "Slot_Width",
     "Slot_Opening",
+    "Slot_Corner_Radius",
+    "Tooth_Tip_Depth",
     "Magnet_Embed_Depth",
     "Rotor_Lam_Length",
     "Stator_Lam_Length",
     "Motor_Length",
+    "MagPhases",
+    "MagTurnsConductor",
+    "MagThrow",
+    "ParallelPaths",
+    "WindingLayers",
+    "MagWindingOffset",
+    "NumberOfCoils",
 ]
 
 OP_PARAMETERS = [
@@ -79,8 +96,6 @@ OUTPUT_NEURON_LIST = [
 CSV_PARAMETERS: list[str] = SIM_IN_GEO_PARAMETERS + OP_PARAMETERS + OUTPUT_NEURON_LIST
 
 GEO_PARAMETERS = [
-    "Slot_Number",
-    "Pole_Number",
     "Airgap",
     "Stator_Bore",
 ]
@@ -95,12 +110,15 @@ LAMBDA_LIST = [
     "lambda_7",
     "lambda_8",
     "lambda_9",
+    "lambda_10",
+    "lambda_11",
+    "lambda_12",
 ]
 
 AXIS_LIST = [
     "Shaft_Speed_norm",
-    "RMSPhaseCurrent_D_density",
     "RMSPhaseCurrent_Q_density",
+    "RMSPhaseCurrent_D_density",
 ]
 
 MACHINE_DEFINITION = GEO_PARAMETERS + LAMBDA_LIST

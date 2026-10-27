@@ -72,8 +72,8 @@ def test_axis_grid_preserves_ambiguous_value(tmp_path: Path) -> None:
 
 def test_current_density_grid_corrects_csv_rounding(tmp_path: Path) -> None:
     loader = DataLoader(tmp_path)
-    loader.map_axes[AXIS_LIST[1]] = np.array([-5.0, 0.0, 5.0])
-    loader.map_axes[AXIS_LIST[2]] = np.array([0.0, 5.0, 10.0])
+    loader.map_axes[AXIS_LIST[1]] = np.array([0.0, 5.0, 10.0])  # Q
+    loader.map_axes[AXIS_LIST[2]] = np.array([-5.0, 0.0, 5.0])  # D
 
     df = pd.DataFrame(
         {
@@ -86,10 +86,10 @@ def test_current_density_grid_corrects_csv_rounding(tmp_path: Path) -> None:
     )
 
     conductor_area = df["PeakCurrent"] / (np.sqrt(2.0) * df["RMSCurrentDensity"])
-    df[AXIS_LIST[1]] = df["RMSPhaseCurrent_D"] / conductor_area
-    df[AXIS_LIST[2]] = df["RMSPhaseCurrent_Q"] / conductor_area
+    df[AXIS_LIST[1]] = df["RMSPhaseCurrent_Q"] / conductor_area
+    df[AXIS_LIST[2]] = df["RMSPhaseCurrent_D"] / conductor_area
 
     result = loader._align_current_density_grid(df)
 
-    assert result[AXIS_LIST[1]].iloc[0] == -5.0
-    assert result[AXIS_LIST[2]].iloc[0] == 10.0
+    assert result[AXIS_LIST[1]].iloc[0] == 10.0
+    assert result[AXIS_LIST[2]].iloc[0] == -5.0

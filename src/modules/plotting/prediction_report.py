@@ -214,7 +214,7 @@ def _channel_architecture_text(
             *mlp["hidden_layers"],
             math.prod(mlp["output_dims"]),
         )
-        mlp_description: str = " → ".join(str(value) for value in mlp_layers)
+        mlp_description: str = "–".join(str(value) for value in mlp_layers)
 
         lines.append(f"MLP: {mlp_description}")
         cnn = part["cnn_autoencoder"]
@@ -224,11 +224,10 @@ def _channel_architecture_text(
             cnn["input_channels"],
             *cnn["features"],
         )
-        cnn_description: str = " → ".join(str(value) for value in cnn_layers)
+        cnn_description: str = "–".join(str(value) for value in cnn_layers)
 
-        lines.append(
-            f"CNN: {cnn_description}; z={cnn['latent_dim']}; k={cnn['kernel_size']}"
-        )
+        lines.append(f"CNN: {cnn_description}")
+        lines.append(f"Latent: {cnn['latent_dim']}; Kernel: {cnn['kernel_size']}")
 
     return "\n".join(lines)
 
@@ -251,7 +250,7 @@ def _draw_report_panel(
     panel_grid = panel_spec.subgridspec(
         3,
         1,
-        height_ratios=(2.2, 2.0, 0.8),
+        height_ratios=(4.0, 1.6, 1.2),
         hspace=0.0,
     )
 

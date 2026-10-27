@@ -46,6 +46,9 @@ logger = logging.getLogger(__name__)
 
 
 class OptimizationArguments(argparse.Namespace):
+    max_layer: int
+    max_neuron: int
+    unit_step: int
     csv: str
     seed: int
     trials: int
@@ -84,6 +87,9 @@ def _search_metrics(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--max_layer", type=int, default=5)
+    parser.add_argument("--max_neuron", type=int, default=500)
+    parser.add_argument("--unit_step", type=int, default=10)
     parser.add_argument("--csv", required=True)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--trials", type=int, default=4000)
@@ -172,9 +178,9 @@ def main() -> None:
     }
 
     search_space: NetworkSearchSpace = NetworkSearchSpace(
-        max_num_layers=4,
-        max_num_units_per_layer=64,
-        unit_step=1,
+        max_num_layers=args.max_layer,
+        max_num_units_per_layer=args.max_neuron,
+        unit_step=args.unit_step,
         min_latent_dim=1,
         max_latent_dim=50,
         latent_step=1,
@@ -186,7 +192,7 @@ def main() -> None:
         search_space=search_space,
         test_filenames=test_filenames,
         n_trials=args.trials,
-        num_kernel=1,
+        num_kernel=4,
         seed=args.seed,
         worker_timeout_seconds=args.worker_timeout,
         autoencoders=autoencoders,
@@ -297,13 +303,13 @@ def main() -> None:
     logger.info("Report saved: %s", report_path)
 
     logger.info(
-    "Metrics:\n%s",
-    json.dumps(
-        metrics,
-        indent=4,
-        ensure_ascii=False,
-        allow_nan=False,
-    ),
+        "Metrics:\n%s",
+        json.dumps(
+            metrics,
+            indent=4,
+            ensure_ascii=False,
+            allow_nan=False,
+        ),
     )
 
 
@@ -312,7 +318,7 @@ if __name__ == "__main__":
 
 
 # Referenzmodell
-# python -m src.executable_files.main_optimize --csv "Results_EMagnetic_simulation_1_60_5_GenType-v2_19.10.2026_20-46-38_CEST_b3f8f82f.csv" --network-type MLP --trials 1000
+# python -m src.executable_files.main_optimize --csv "Results_EMagnetic_simulation_1_20_5_GenType-v2_26.10.2026_16-14-42_CET_99d7fc38.csv" --network-type MLP --trials 40 --max_layer 5 --max_neuron 500 --unit_step 10
 
 
 # CNN-Sammlung

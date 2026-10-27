@@ -97,11 +97,11 @@ class DataLoader:
                 dtype=np.float64,
             ),
             AXIS_LIST[1]: np.asarray(
-                np.round(np.linspace(*D_CURRENT_DENSITY, MAP_SIZE[1]) * 20) / 20,
+                np.linspace(*Q_CURRENT_DENSITY, MAP_SIZE[1]),
                 dtype=np.float64,
             ),
             AXIS_LIST[2]: np.asarray(
-                np.round(np.linspace(*Q_CURRENT_DENSITY, MAP_SIZE[2]) * 20) / 20,
+                np.linspace(*D_CURRENT_DENSITY, MAP_SIZE[2]),
                 dtype=np.float64,
             ),
         }
@@ -135,6 +135,7 @@ class DataLoader:
             self._test_columns(_dataframe)
             _dataframe = _dataframe[CSV_PARAMETERS].copy()
             _dataframe = self._recalculate_data(_dataframe)
+            _dataframe = self._align_speed_grid(_dataframe)
             _dataframe = self._align_current_density_grid(_dataframe)
             _dataframe = self._clean_data(_dataframe, name)
             if _dataframe.empty:
@@ -243,6 +244,7 @@ class DataLoader:
             "Stator_Lam_Dia",
             "Magnet_Length",
             "Slot_Depth",
+            "Slot_Width",
             "Rotor_Lam_Length",
         )
 
@@ -270,8 +272,8 @@ class DataLoader:
         conductor_area = df["PeakCurrent"] / (np.sqrt(2) * df["RMSCurrentDensity"])
 
         df[AXIS_LIST[0]] = df["ShaftSpeed"] / d_sa
-        df[AXIS_LIST[1]] = df["RMSPhaseCurrent_D"] / conductor_area
-        df[AXIS_LIST[2]] = df["RMSPhaseCurrent_Q"] / conductor_area
+        df[AXIS_LIST[1]] = df["RMSPhaseCurrent_Q"] / conductor_area
+        df[AXIS_LIST[2]] = df["RMSPhaseCurrent_D"] / conductor_area
 
         df[LAMBDA_LIST[0]] = d_si / d_sa
         df[LAMBDA_LIST[1]] = df["Magnet_Arc_[ED]"] / 180
@@ -294,6 +296,9 @@ class DataLoader:
             / (math.pi * (d_sa + d_si))
         )
         df[LAMBDA_LIST[8]] = df["Magnet_Length"] / df["Rotor_Lam_Length"]
+        df[LAMBDA_LIST[9]] = df["Slot_Opening"] / df["Slot_Width"]
+        df[LAMBDA_LIST[10]] = df["Tooth_Tip_Depth"] / df["Slot_Depth"]
+        df[LAMBDA_LIST[11]] = df["Slot_Corner_Radius"] / (df["Slot_Width"]/2)
 
         return df
 
@@ -384,8 +389,8 @@ class DataLoader:
         density_bounds = density[usable, None] + offsets
 
         for axis_name, current_name in (
-            (AXIS_LIST[1], "RMSPhaseCurrent_D"),
-            (AXIS_LIST[2], "RMSPhaseCurrent_Q"),
+            (AXIS_LIST[1], "RMSPhaseCurrent_Q"),
+            (AXIS_LIST[2], "RMSPhaseCurrent_D"),
         ):
             current = df[current_name].to_numpy(dtype=np.float64)
             current_bounds = current[usable, None] + offsets

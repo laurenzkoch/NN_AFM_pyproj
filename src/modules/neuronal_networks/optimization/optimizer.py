@@ -10,10 +10,12 @@ from dataclasses import asdict, dataclass
 from importlib.metadata import version
 from multiprocessing import Process
 from multiprocessing.queues import Queue as ProcessQueue
+from pathlib import Path
 
 import numpy as np
 import optuna
 import torch
+from optuna.storages import JournalStorage
 
 from src.config.config_logging import setup_worker_logging
 from src.config.config_mcad_parameters import (
@@ -35,6 +37,9 @@ from src.modules.neuronal_networks.NN_types.cnn_autoencoder import (
     Conv3dAutoencoder,
 )
 from src.modules.neuronal_networks.NN_types.mlp_with_torch import MLP
+from src.modules.neuronal_networks.optimization.journal_storage import (
+    create_journal_storage,
+)
 from src.modules.neuronal_networks.optimization.optimization_types import (
     ChannelOptimizationResult,
     NetworkArchitecture,
@@ -65,7 +70,7 @@ def _optuna_worker(
     n_trials: int,
     progress_queue: ProcessQueue[PipelineEvent],
     study_name: str,
-    storage: str,
+    journal_path: Path,
     seed: int,
     objective_seed: int,
     log_queue: ProcessQueue[logging.LogRecord] | None = None,
@@ -91,7 +96,7 @@ def _optuna_worker(
             channel_name,
             seed,
         )
-
+        storage: JournalStorage = create_journal_storage(journal_path)
         study: optuna.Study = optuna.load_study(
             study_name=study_name,
             storage=storage,
@@ -230,8 +235,8 @@ class NNOptimizer:
         self.experiment_dir = PATH_DATA / "optimization" / self.fingerprint
         self.experiment_dir.mkdir(parents=True, exist_ok=True)
 
-        database: str = (self.experiment_dir / "study.sqlite3").resolve().as_posix()
-        self.storage: str = "sqlite:///" + database
+        self.journal_path: Path = (self.experiment_dir / "study.journal").resolve()
+        self.storage: JournalStorage = create_journal_storage(self.journal_path)
 
     def run(self) -> None:
         self.cancellation.raise_if_requested()
@@ -481,7 +486,7 @@ class NNOptimizer:
                         "n_trials": self.n_trials,
                         "progress_queue": self.progress_queue,
                         "study_name": self.study_name,
-                        "storage": self.storage,
+                        "journal_path": self.journal_path,
                         "seed": self.seed + index,
                         "objective_seed": self.seed,
                         "log_queue": self.log_queue,

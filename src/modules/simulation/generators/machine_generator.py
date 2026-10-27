@@ -142,7 +142,12 @@ class AFMMachineGenerator:
         # axial: lambda_9 = l_PM / l_R
         #   l_R =  l_PM / lambda_9
 
-        #shaft_speed_norm = shaft_speed / d_sa
+        # lambda_10 = b_tto / b_S
+
+        # lambda_11 = d_ttd / d_S
+
+        # shaft_speed_norm = shaft_speed / d_sa
+        #w*d_a/2 = 2*pi*n*d_a/2 = v_umfang [mm / min]
 
         s = SLOT_NUMBER
         p = POLE_NUMBER
@@ -152,13 +157,15 @@ class AFMMachineGenerator:
         beta_pm = lambdas[1] * 360 / 2
         l_pm = g / lambdas[2]
         b_s = lambdas[3] * math.pi * d_si / s
-        t_s = b_s / lambdas[4]
-        b_tto = 0.8 * b_s
+        d_s = b_s / lambdas[4]
         h_pm = lambdas[5] * (d_sa - d_si) / 2
         d_emb = lambdas[6] * ((d_sa - d_si) / 2 - h_pm)
         d_mean = (d_sa + d_si) / 2
-        l_s = t_s + lambdas[7] * math.pi * d_mean / p
+        l_s = d_s + lambdas[7] * math.pi * d_mean / p
         l_r = l_pm / lambdas[8]
+        b_tto = lambdas[9] * b_s
+        d_ttd = lambdas[10] * d_s
+        r_s = lambdas[11] * (b_s/2)
 
         return {
             "Slot_Number": s,
@@ -170,8 +177,10 @@ class AFMMachineGenerator:
             "Magnet_Arc_[ED]": beta_pm,
             "Magnet_Length": l_pm,
             "Slot_Width": b_s,
-            "Slot_Depth": t_s,
+            "Slot_Depth": d_s,
             "Slot_Opening": b_tto,
+            "Slot_Corner_Radius": r_s,
+            "Tooth_Tip_Depth": d_ttd,
             "Magnet_Thickness": h_pm,
             "Magnet_Embed_Depth": d_emb,
             "Rotor_Lam_Length": l_r,
@@ -186,13 +195,15 @@ class AFMMachineGenerator:
 
     def _lambda_generator_v2(self) -> Generator[dict[str, float]]:
         lambdas = self._get_lambda_values_v2()
-        airgap_dsi_samples, op_samples = (
-            self._get_samples()
-        )
+        airgap_dsi_samples, op_samples = self._get_samples()
 
         for airgap_sample, stator_bore_sample in airgap_dsi_samples:
             for lambda_set in lambdas:
-                for shaft_speed_norm, q_current_density, d_current_density in op_samples:
+                for (
+                    shaft_speed_norm,
+                    q_current_density,
+                    d_current_density,
+                ) in op_samples:
                     yield self._calculate_geometric(
                         airgap_sample,
                         stator_bore_sample,
