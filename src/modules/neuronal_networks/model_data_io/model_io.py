@@ -14,9 +14,9 @@ from torch import Tensor
 from src.config.config_mcad_parameters import (
     AXIS_LIST,
     GEO_PARAMETERS_MIN_MAX_DICT,
-    MACHINE_DEFINITION,
     OUTPUT_NEURON_LIST,
 )
+from src.modules.geometry.feature_schema import MACHINE_DEFINITION
 from src.modules.neuronal_networks.autoencoder_collection import (
     AutoencoderCollection,
 )

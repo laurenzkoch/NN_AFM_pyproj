@@ -1,9 +1,7 @@
 D_CURRENT_DENSITY: tuple[float, float] = (-10, 0)
 Q_CURRENT_DENSITY: tuple[float, float] = (1, 25)
-SHAFT_SPEED_NORM: tuple[float, float] = (
-    0.1,
-    1,
-)  # shaft_speed_norm = shaft_speed / d_sa
+# shaft_speed_norm = shaft_speed / (d_sa*pi)
+SHAFT_SPEED_NORM: tuple[float, float] = (0.05, 1)
 MAP_SIZE: tuple[int, int, int] = (5, 5, 5)
 
 POLE_NUMBER: int = 12
@@ -16,34 +14,30 @@ GEO_PARAMETERS_MIN_MAX_DICT = {
     "Stator_Bore": STATOR_BORE,
 }
 
-LAMBDA_MIN_MAX: list[tuple[float, float]] = [
+LAMBDA_BOUNDS: dict[str, tuple[float, float]] = {
     # radial:       lambda_1 = D_Si / D_Sa
-    (0.2, 0.8),
+    "lambda_1": (0.2, 0.8),
     # tangential:   lambda_2 = beta_PM / beta_p = 2 * Magnet_Arc_[ED] / 360
-    (0.5, 0.9),
+    "lambda_2": (0.5, 0.9),
     # axial:        lambda_3 = g / l_PM
-    (0.2, 1.0),
+    "lambda_3": (0.2, 1.0),
     # tangential:   lambda_4 = b_S / tau_s = s*b_S / pi*D_Si
-    (0.3, 0.7),
+    "lambda_4": (0.3, 0.7),
     # axial:        lambda_5 = b_S / d_S
-    (0.1, 1.0),
+    "lambda_5": (0.1, 1.0),
     # radial:       lambda_6 = h_PM / (D_Sa - D_Si)/2
-    (0.6, 1.0),
+    "lambda_6": (0.6, 1.0),
     # radial:       lambda_7 = d_emb / ((D_Sa - D_Si)/2 - h_PM)
-    (0.0, 0.95),
+    "lambda_7": (0.0, 0.95),
     # tangential:   lambda_8 = Dicke des magnetischen Rückflusses / tau_p
     # = 2*p * (l_S - d_s) / (pi * D_Si * (1 + 1/lambda_1))
-    (0.1, 0.4),
+    "lambda_8": (0.1, 0.4),
     # axial:        lambda_9 = l_PM / l_R
-    (0.2, 1.0),
-    # lambda_10 = b_tto / b_S
-    (0.1, 1.0),
-    # lambda_11 = d_ttd / d_S
-    (0.0, 0.3),
-    #lambda_12 = r_s / (b_S/2)
-    (0.0, 1.0),
-]
-
+    "lambda_9": (0.2, 1.0),
+    "lambda_10": (0.1, 1.0),  # lambda_10 = b_tto / b_S
+    "lambda_11": (0.0, 0.3),  # lambda_11 = d_ttd / d_S
+    "lambda_12": (0.0, 1.0),  # lambda_12 = r_s / (b_S/2)
+}
 
 SIM_IN_GEO_PARAMETERS = [
     "Pole_Number",
@@ -100,28 +94,11 @@ GEO_PARAMETERS = [
     "Stator_Bore",
 ]
 
-LAMBDA_LIST = [
-    "lambda_1",
-    "lambda_2",
-    "lambda_3",
-    "lambda_4",
-    "lambda_5",
-    "lambda_6",
-    "lambda_7",
-    "lambda_8",
-    "lambda_9",
-    "lambda_10",
-    "lambda_11",
-    "lambda_12",
-]
-
 AXIS_LIST = [
     "Shaft_Speed_norm",
     "RMSPhaseCurrent_Q_density",
     "RMSPhaseCurrent_D_density",
 ]
-
-MACHINE_DEFINITION = GEO_PARAMETERS + LAMBDA_LIST
 
 DEFAULT_VALUES = {
     "AFM_D_Rotor": 150,

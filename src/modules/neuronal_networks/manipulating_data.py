@@ -18,8 +18,6 @@ from src.config.config_mcad_parameters import (
     D_CURRENT_DENSITY,
     GEO_PARAMETERS,
     GEO_PARAMETERS_MIN_MAX_DICT,
-    LAMBDA_LIST,
-    MACHINE_DEFINITION,
     MAP_SIZE,
     OUTPUT_NEURON_LIST,
     Q_CURRENT_DENSITY,
@@ -30,6 +28,12 @@ from src.modules.data_managment.experiment_utils import (
     file_sha256,
     geometry_ids,
     require_disjoint_split_ids,
+)
+from src.modules.geometry.feature_schema import MACHINE_DEFINITION
+from src.modules.geometry.lambda_geometry import (
+    GEOMETRY_INPUT_COLUMNS,
+    LambdaValues,
+    lambdas_from_geometry,
 )
 
 logger = logging.getLogger(__name__)
@@ -231,74 +235,64 @@ class DataLoader:
             raise ValueError(f"Missing CSV columns: {missing}")
 
     @staticmethod
+    def _add_lambda_columns(df: pd.DataFrame) -> pd.DataFrame:
+        columns: list[str] = LambdaValues.columns()
+
+        lambda_values: NDArray[np.float64] = np.empty(
+            (len(df), len(columns)),
+            dtype=np.float64,
+        )
+
+        groups = df.groupby(
+            list(GEOMETRY_INPUT_COLUMNS),
+            sort=False,
+            dropna=False,
+        )
+
+        for geometry_key, positions in groups.indices.items():
+
+            if not isinstance(geometry_key, tuple):
+                raise TypeError("Expected a tuple as geometry grouping key.")
+
+            if len(geometry_key) != len(GEOMETRY_INPUT_COLUMNS):
+                raise ValueError("Unexpected geometry grouping key length.")
+
+            geometry: dict[str, float] = {
+                name: float(value)
+                for name, value in zip(
+                    GEOMETRY_INPUT_COLUMNS,
+                    geometry_key,
+                    strict=True,
+                )
+            }
+
+            lambdas: LambdaValues = lambdas_from_geometry(geometry)
+            lambda_values[positions, :] = lambdas.to_array()
+
+        df[columns] = lambda_values
+        return df
+
+    @staticmethod
     def _recalculate_data(df: pd.DataFrame) -> pd.DataFrame:
         raw_values: NDArray[np.float64] = df[CSV_PARAMETERS].to_numpy(dtype=np.float64)
 
         if not bool(np.isfinite(raw_values).all()):
             raise ValueError("Source data contains NaN or infinite values.")
 
-        positive_columns: tuple[str, ...] = (
-            "PeakCurrent",
-            "RMSCurrentDensity",
-            "Stator_Bore",
-            "Stator_Lam_Dia",
-            "Magnet_Length",
-            "Slot_Depth",
-            "Slot_Width",
-            "Rotor_Lam_Length",
-        )
+        # Validate geometry and calculate lambda columns centrally.
+        df = DataLoader._add_lambda_columns(df)
 
-        for column in positive_columns:
+        for column in ("PeakCurrent", "RMSCurrentDensity"):
             if bool((df[column] <= 0).any()):
                 raise ValueError(f"'{column}' must be strictly positive.")
 
-        radial_width_values: NDArray[np.float64] = (
-            (df["Stator_Lam_Dia"] - df["Stator_Bore"]) / 2
-        ).to_numpy(dtype=np.float64)
+        conductor_area = df["PeakCurrent"] / (
+                np.sqrt(2) * df["RMSCurrentDensity"]
+        )
 
-        remaining_width: NDArray[np.float64] = radial_width_values - df[
-            "Magnet_Thickness"
-        ].to_numpy(dtype=np.float64)
-
-        if bool((radial_width_values <= 0).any()):
-            raise ValueError("Radial width must be strictly positive.")
-
-        if bool((remaining_width <= 0).any()):
-            raise ValueError("Radial width minus magnet thickness must be positive.")
-
-        d_si = df["Stator_Bore"]
-        d_sa = df["Stator_Lam_Dia"]
-        radial_width = (d_sa - d_si) / 2
-        conductor_area = df["PeakCurrent"] / (np.sqrt(2) * df["RMSCurrentDensity"])
-
-        df[AXIS_LIST[0]] = df["ShaftSpeed"] / d_sa
+        df[AXIS_LIST[0]] = df["ShaftSpeed"] / (df["Stator_Lam_Dia"] * math.pi)
         df[AXIS_LIST[1]] = df["RMSPhaseCurrent_Q"] / conductor_area
         df[AXIS_LIST[2]] = df["RMSPhaseCurrent_D"] / conductor_area
-
-        df[LAMBDA_LIST[0]] = d_si / d_sa
-        df[LAMBDA_LIST[1]] = df["Magnet_Arc_[ED]"] / 180
-        df[LAMBDA_LIST[2]] = df["Airgap"] / df["Magnet_Length"]
-
-        # b_S / tau_s, b_S / d_S, h_PM / ((D_Sa - D_Si) / 2)
-        df[LAMBDA_LIST[3]] = df["Slot_Number"] * df["Slot_Width"] / (math.pi * d_si)
-        df[LAMBDA_LIST[4]] = df["Slot_Width"] / df["Slot_Depth"]
-        df[LAMBDA_LIST[5]] = df["Magnet_Thickness"] / radial_width
-
-        # d_emb / (radial_width - h_PM)
-        df[LAMBDA_LIST[6]] = df["Magnet_Embed_Depth"] / (
-            radial_width - df["Magnet_Thickness"]
-        )
-        # (l_S - d_S) / tau_p, with tau_p = pi * (D_Sa + D_Si) / (2 * p)
-        df[LAMBDA_LIST[7]] = (
-            2
-            * df["Pole_Number"]
-            * (df["Stator_Lam_Length"] - df["Slot_Depth"])
-            / (math.pi * (d_sa + d_si))
-        )
-        df[LAMBDA_LIST[8]] = df["Magnet_Length"] / df["Rotor_Lam_Length"]
-        df[LAMBDA_LIST[9]] = df["Slot_Opening"] / df["Slot_Width"]
-        df[LAMBDA_LIST[10]] = df["Tooth_Tip_Depth"] / df["Slot_Depth"]
-        df[LAMBDA_LIST[11]] = df["Slot_Corner_Radius"] / (df["Slot_Width"]/2)
 
         return df
 

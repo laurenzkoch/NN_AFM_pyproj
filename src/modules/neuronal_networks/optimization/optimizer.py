@@ -19,7 +19,6 @@ from optuna.storages import JournalStorage
 
 from src.config.config_logging import setup_worker_logging
 from src.config.config_mcad_parameters import (
-    MACHINE_DEFINITION,
     OUTPUT_NEURON_LIST,
 )
 from src.config.config_paths import PATH_DATA
@@ -28,6 +27,7 @@ from src.modules.data_managment.experiment_utils import (
     file_sha256,
     validate_search_settings,
 )
+from src.modules.geometry.feature_schema import MACHINE_DEFINITION
 from src.modules.neuronal_networks.manipulating_data import (
     MachineDataTensor,
     TrainValidationTestDataTensors,

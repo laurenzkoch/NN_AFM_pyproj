@@ -317,12 +317,16 @@ if __name__ == "__main__":
     main()
 
 
-# Referenzmodell
-# python -m src.executable_files.main_optimize --csv "Results_EMagnetic_simulation_1_20_5_GenType-v2_26.10.2026_16-14-42_CET_99d7fc38.csv" --network-type MLP --trials 40 --max_layer 5 --max_neuron 500 --unit_step 10
+# Referenzmodell, PowerShell:
+# python -m src.executable_files.main_optimize `
+#   --csv "DEINE_DATEI.csv" `
+#   --network-type MLP --trials 40 `
+#   --max_layer 5 --max_neuron 500 --unit_step 10
 
-
-# CNN-Sammlung
-# python -m src.executable_files.main_optimize --csv "Results_EMagnetic_simulation_1_60_5_GenType-v2_19.10.2026_20-46-38_CEST_b3f8f82f.csv" --network-type CNN --trials 1000
+# CNN-Sammlung, PowerShell:
+# python -m src.executable_files.main_optimize `
+#   --csv "DEINE_DATEI.csv" `
+#   --network-type CNN --trials 1000
 
 # Kombimodell
 # python -m src.executable_files.main_optimize --csv "DATEI.csv" --network-type

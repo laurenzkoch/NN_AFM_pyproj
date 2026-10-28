@@ -4,8 +4,9 @@ from typing import cast
 import pytest
 import torch
 
-from src.config.config_mcad_parameters import MACHINE_DEFINITION, OUTPUT_NEURON_LIST
+from src.config.config_mcad_parameters import OUTPUT_NEURON_LIST
 from src.modules.data_managment.experiment_utils import file_sha256
+from src.modules.geometry.feature_schema import MACHINE_DEFINITION
 from src.modules.neuronal_networks.autoencoder_collection import (
     AutoencoderCollection,
 )
