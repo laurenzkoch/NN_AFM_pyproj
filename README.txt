@@ -1,881 +1,651 @@
 NN_AFM_pyproj
 =============
 
-Automatisierte Motor-CAD-Simulationen und Surrogatmodelle für Axialflussmaschinen
-Konfiguration und zugehörige Abläufe abgeglichen: 26.10.2026
-Übrige Abschnitte und Bestandsangaben: Stand 20.10.2026
+Motor-CAD-Simulationen und neuronale Ersatzmodelle für Axialflussmaschinen
+Abgleich mit Quellcode, Tests und Konfiguration: 28.10.2026
 
-Das Projekt erzeugt Maschinengeometrien und Betriebspunktkennfelder, berechnet
-sie mit Ansys Motor-CAD und speichert erfolgreiche Ergebnisse als CSV. Aus
-vollständigen Kennfeldern werden PyTorch-Tensoren aufgebaut. Optuna sucht eine
-MLP-Architektur zur Vorhersage ganzer Kennfelder aus der Maschinengeometrie.
+Das Projekt erzeugt Maschinengeometrien und Betriebspunkte, berechnet sie mit
+Ansys Motor-CAD und schreibt Ergebnisse als CSV. PyTorch verarbeitet vollständige
+Kennfelder. Optuna sucht für jede der sieben Ergebnisgrößen eine eigene
+Netzarchitektur. main_optimize.py unterstützt drei Varianten:
 
-Aktuelle Abläufe:
+    Referenzmodell   Geometrie -> MLP -> vollständiges Kennfeld je Kanal
+    CNN-Sammlung    Kennfeld -> Encoder -> latenter Raum -> Decoder -> Kennfeld
+    Kombimodell     Geometrie -> MLP -> eingefrorener CNN-Decoder -> Kennfeld
 
-    main_mcad_sim.py
-        -> Folge von (Basisdesigns, Lambda-Designs)-Kombinationen
-        -> Maschinen- und Betriebspunktgenerator je Kombination
-        -> parallele elektromagnetische Motor-CAD-Simulation
-        -> data/MCAD_Results/*.csv
+Eine CNN-Sammlung rekonstruiert vorhandene Kennfelder. Erst Referenz- und
+Kombimodell sagen Kennfelder aus Geometrien voraus. Simulation und Training sind
+getrennt; Daten werden nicht automatisch nach Training_data kopiert.
 
-    main_optimize.py
-        -> CSV-Dateien in data/Training_data
-        -> Bereinigung, Tensoren, Train-/Validierungs-/Testaufteilung
-        -> Optuna-Suche mit sieben MLP-Teilmodellen je Versuch
-        -> Validierungs-MSE, R² und experimentbezogene SQLite-Studie
-        -> finales Training der besten Architektur und externe Testauswertung
-        -> Modellbundle mit Gewichten, Skalierung und Herkunftsdaten
-        -> evaluation.pt mit Referenzwerten und Vorhersagen
-        -> Einzelplots als PNG/PDF und einseitiger PDF-Bericht
+Aktuell vor einem produktiven Lauf beachten:
 
-Beide Abläufe verwenden die gemeinsame Pipeline mit Tkinter-Fortschrittsfenster
-und Logging. Die Optimierung benötigt keine laufende Motor-CAD-Anwendung.
-Die Simulationsanbindung ist vom gemeinsamen Pipeline-Modul getrennt.
-main_optimize.py besitzt Kommandozeilenoptionen; Simulationsumfang und
-Trainings-/Suchraumvorgaben werden weiterhin im Code geändert.
-main_adopt_legacy_csv.py übernimmt den im Skript konfigurierten CSV-Stand als
-Cache-Quelle. main_plot_results.py erzeugt Diagramme und Bericht erneut aus
-gespeicherten Auswertungsdaten.
+- Beide direkt in Training_data vorhandenen CSVs haben 29 statt der erforderlichen
+  39 Spalten und werden vom heutigen Datenlader abgelehnt (Abschnitt 5).
+- Der Drehzahl-Rundungsabgleich weicht von der aktuellen Formel mit pi ab
+  (Abschnitt 10). Die Startbeispiele setzen passende Daten voraus.
+- Workflow, Artefaktreferenz und Testkonzept in docs sind aktualisiert.
+  Abschnitt 11 beschreibt ihre Zuständigkeiten und noch offene Prüfaufgaben.
 
-Die aktuelle Überarbeitung gleicht config_mcad_parameters.py und die zugehörigen
-Generator-/Datenladefunktionen statisch ab. Simulation, Training, Datenübernahme
-und Tests wurden dafür nicht gestartet. Offene Anpassungen dieser Umstellung
-stehen in Abschnitt 9. Vorhandene Laufartefakte sind in Abschnitt 7 beschrieben.
+Der erste Projektabgleich erfasste alle 82 Python-Dateien unter src und tests
+statisch und syntaktisch per AST sowie Konfiguration, Paketversionen und CSV-
+Kopfzeilen. Bei der anschließenden Dokumentationsaktualisierung wurden diese
+README und die drei Dateien in docs geändert; Code und Daten blieben unverändert.
+Verweise, Testmatrix und dokumentierte CLI wurden erneut geprüft. Kein pytest-,
+Ruff-, Trainings- oder Simulationslauf wurde dafür gestartet. Binäre Modelle,
+Diagramme und Sicherungen wurden nicht fachlich neu validiert.
 
 
-1. Projektstruktur
-------------------
+1. Struktur und Einstiegspunkte
+--------------------------------
 
-NN_AFM_pyproj/
-|-- README.txt
-|-- environment.yml                 Conda-Umgebung Env_NN_AFM
-|-- requirements.txt                Gemeinsame Python-Paketliste
-|-- pyproject.toml                  Ruff-Zielversion Python 3.14
-|-- pytest.ini                      Testpfade und Marker
-|-- tests/                          Regressionstests mit synthetischen Daten
-|-- docs/                           Ergänzende Workflow-, Datei- und Testdokumente
-|-- data/
-|   |-- MCAD_Results/                Simulations-CSV; neue Läufe mit .meta.json
-|   |-- Training_data/              Hauptquelle und automatisch gewählte Test-CSV
-|   |-- optimization/               SQLite-Studie je Experimentfingerprint
-|   |-- logs/                       Pipeline- und Simulationsprotokolle
-|   |-- plots/                      Historische Diagramme; neue Plots im Laufordner
-|   '-- trained_nn/                 Modellbundles und ältere Trainingsartefakte
-'-- src/
-    |-- config/
-    |   |-- config_paths.py          Datei-, Programm- und Ausgabepfade
-    |   |-- config_logging.py        Queue-basiertes Logging
-    |   '-- config_mcad_parameters.py
-    |                               CSV-Spalten, Merkmale, Raster und Bereiche
-    |-- executable_files/
-    |   |-- main_mcad_sim.py         Simulation starten
-    |   |-- main_optimize.py         MLP-Architektur mit Optuna optimieren
-    |   |-- machine_test.py          Geometrie-Randbedingungen prüfen
-    |   |-- main_adopt_legacy_csv.py  Metadaten der konfigurierten CSV neu schreiben
-    |   '-- main_plot_results.py     Gespeicherten Modelllauf neu darstellen
-    '-- modules/
-        |-- Pipeline_and_GUI/       Pipeline, Ereignisse, GUI und Abbruchsignal
-        |-- data_managment/         CSV, Dateien, Experimente, Simulationsmetadaten
-        |-- simulation/             Simulationspipeline und Prozesspool
-        |   '-- generators/         Maschinenentwürfe und Betriebspunktraster
-        |-- process/                Windows-Prozesse, eduVPN, CPU-/Worker-Schutz
-        |   '-- motor_cad_processes/ Motor-CAD-Instanzen und Randbedingungen
-        |-- neuronal_networks/      Daten, Training, Surrogatmodelle, Modell-I/O
-        |   |-- NN_types/           MLP und Conv3dAutoencoder
-        |   '-- optimization/       Optuna-Worker und OptimizationPipline
-        '-- plotting/               Gemeinsame Plotbasis, Einzelplots und PDF-Bericht
+    src/config/                     Pfade, Parameter und Logging
+    src/executable_files/           Startskripte
+    src/modules/geometry/           Lambda-Definitionen und Geometrieumrechnung
+    src/modules/simulation/         Serie, Generatoren und Prozesspool
+    src/modules/process/            Motor-CAD, eduVPN und Windows-Prozessschutz
+    src/modules/Pipeline_and_GUI/   Ablauf, Tk-GUI, Ereignisse und Abbruch
+    src/modules/data_managment/     CSV, Dateien, Hashes und Metadaten
+    src/modules/neuronal_networks/  Daten, Training, Modelle, Optimierung und I/O
+    src/modules/plotting/           Einzelplots und PDF-Bericht
+    tests/                          Zwölf Testmodule und gemeinsame Helfer
+    docs/                           Workflow, Speicherorte und Testkonzept
 
-Die Schreibweisen data_managment, neuronal_networks und optimization_pipline.py
-entsprechen dem Code. Die früheren Einstiege main_nn.py, main_create_plots.py
-und adopt_legacy_csv.py sowie die alten allgemeinen Plothelfer sind entfernt.
-Der aktuelle Optimierungsworkflow verwendet ausschließlich PyTorch.
+Startskripte unter src/executable_files:
+
+    main_mcad_sim.py          Konfigurierte Simulationsserie
+    main_optimize.py          Referenzmodell, CNN-Sammlung oder Kombimodell
+    main_plot_results.py      Gespeicherte Auswertung erneut darstellen
+    main_adopt_legacy_csv.py  Metadaten einer konfigurierten Alt-CSV schreiben
+    machine_test.py           Generatorgeometrien ohne Motor-CAD-Start prüfen
+
+Alle Befehle gelten aus der Projektwurzel in PowerShell:
+
+    Set-Location D:\Python_Projects\NN_AFM_pyproj
+
+Imports verwenden src.config/src.modules; keine zusätzliche PYTHONPATH-Einstellung
+für Modulstarts nötig. data_managment, neuronal_networks und
+optimization_pipline.py sind die tatsächlichen Schreibweisen.
 
 
-2. Umgebung einrichten
-----------------------
+2. Umgebung und Abgleich der Abhängigkeiten
+-------------------------------------------
 
-Die Simulation und Prozesssteuerung sind auf Windows ausgelegt. Die konfigurierte
-PyCharm-Umgebung ist Env_NN_AFM mit Python 3.14.4. Die Versionsvorgaben in den
-Umgebungsdateien beschreiben den aktuellen Paketbedarf, einschließlich NumPy
-2.5.3 und SciPy 1.18.1. Ihre Kopfkommentare nennen noch den älteren Stand vom
-12.10.2026. Sie sind keine vollständige Sperrdatei aller indirekten Abhängigkeiten.
+PyCharm verwendet Env_NN_AFM mit Python 3.14.4:
 
-Aus der Projektwurzel in einer für Conda eingerichteten PowerShell:
+    D:\Miniconda\envs\Env_NN_AFM\python.exe
+
+Simulation und Windows-Jobobjekte benötigen Windows. Tkinter stellt die GUI
+bereit; die Plotfunktionen verlangen eine installierte Arial-Schrift ohne
+Fontfallback. Motor-CAD, Lizenz, .mot-Basisdatei und gegebenenfalls eduVPN werden
+separat bereitgestellt. Python 3.14 wird unter anderem für
+ProcessPoolExecutor.kill_workers() verwendet.
+
+Neue Conda-Umgebung in einer für Conda eingerichteten PowerShell:
 
     conda env create -f environment.yml
     conda activate Env_NN_AFM
 
-Eine bestehende Umgebung aktualisieren:
+Bestehende Umgebung aktualisieren:
 
     conda env update -n Env_NN_AFM -f environment.yml
 
-Conda installiert Python, Tk, Zeitzonendaten sowie die aufgeführten numerischen,
-Plot- und HTTP-Pakete. Der pip-Abschnitt bindet requirements.txt ein und ergänzt
-unter anderem PyTorch, PyMotorCAD, Optuna und seaborn. Doppelt aufgeführte
-Python-Pakete sind kompatibel vorgegeben; bei idna erlaubt Conda >=3,<4,
-während requirements.txt die Version 3.15 festlegt. Die Conda-Datei enthält
-außerdem nomkl und blas=*=openblas für den BLAS-Unterbau.
-
-Alternativ in einer bereits eingerichteten Python-3.14.4-Umgebung mit Tkinter:
+Alternativ in einer passenden Python-3.14.4-Umgebung mit Tkinter:
 
     python -m pip install -r requirements.txt
 
-Python, Tkinter, Motor-CAD und eduVPN werden nicht über requirements.txt
-installiert. sqlite3 für die Optuna-Datenbank gehört zur Python-Standardbibliothek.
-Das Python-Paket tzdata liefert unter Windows die Daten für zoneinfo.
+environment.yml installiert Python, pip, Tk, Zeitzonendaten sowie aufgeführte
+numerische, Plot- und HTTP-Pakete mit Conda. Der pip-Abschnitt bindet
+requirements.txt ein. nomkl und blas=*=openblas legen den Conda-BLAS-Unterbau
+fest; reine pip-Installation bildet diese Konfiguration nicht nach.
 
-Pakete und Aufgaben:
+Überlappende Vorgaben:
 
-    numpy, pandas          Numerik, CSV-Verarbeitung und Tensorvorbereitung
-    scipy                  Latin-Hypercube-Sampling der Geometrieparameter
-    torch                  MLP, Autoencoder, CPU-Training und Tensoren
-    optuna                 Architektur-Suche und persistente SQLite-Studie
-    ansys-motorcad-core    Motor-CAD-Schnittstelle
-    matplotlib             Einzelplots und PDF-Bericht mit Arial
-    plotly, seaborn         Weiterhin in der Paketliste; keine aktiven Plothelfer
-    pywin32                Windows-Jobobjekte für Motor-CAD-Worker und Kindprozesse
-    types-pywin32          Typinformationen für die Windows-Anbindung
-    pytest, ruff           Regressionstests und Quellcodeprüfung
-    requests, idna,
-    charset-normalizer     Explizit gepflegter HTTP-Unterbau für PyMotorCAD
-    tzdata                 Zeitzone Europe/Berlin unter Windows
+    Paket                   requirements.txt       Conda-Eintrag in YAML
+    numpy                   ==2.5.3                ==2.5.3
+    scipy                   ==1.18.1               ==1.18.1
+    pandas                  ==3.0.2                =3.0.2
+    matplotlib              ==3.10.9               =3.10.9
+    plotly                  ==6.7.0                =6.7.0
+    requests                ==2.34.2               =2.34.2
+    idna                    ==3.15                 >=3,<4
+    charset-normalizer      ==3.4.7                =3.4.7
 
-scikit-learn wird vom aktuellen Quellcode nicht importiert und ist deshalb kein
-Eintrag mehr in den Umgebungsdateien. Historische Diagramme können weiterhin
-Ergebnisse früherer scikit-learn-Versuche enthalten.
+Diese Vorgaben sind vereinbar. Bei idna schränkt requirements den weiteren
+Conda-Bereich ein. Python-tzdata==2026.2 wird unter Windows über requirements
+installiert; der Conda-Eintrag tzdata ist eine eigene Systemdaten-Abhängigkeit.
+Python und Tk gehören nicht in requirements.txt.
 
-Die Diagrammfunktionen verlangen die installierte Schrift Arial ohne automatischen
-Fallback. Sie wird nicht durch requirements.txt bereitgestellt. Python 3.14 ist
-auch für ProcessPoolExecutor.kill_workers() im Abbruchpfad vorgesehen.
+Weitere requirements-Einträge werden über den pip-Abschnitt eingebunden:
 
-Importpfade und Startverzeichnis
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    torch==2.13.0                Netze und CPU-Training
+    ansys-motorcad-core==0.8.6    Motor-CAD-Anbindung
+    optuna==5.0.0                Architektur-Suche und JournalStorage
+    seaborn==0.13.2              Aktuell ohne Import im Projekt
+    pytest>=8,<10                Regressionstests
+    ruff>=0.14,<1                Quellcode- und Formatprüfung
+    pywin32, nur Windows         Jobobjekte und Windows-Testhelfer
+    types-pywin32, nur Windows   Typinformationen für pywin32
 
-Die aktuellen Projektmodule verwenden src.config/src.modules. Alle folgenden
-Startbefehle werden aus der Projektwurzel ausgeführt; dafür ist keine zusätzliche
-PYTHONPATH-Einstellung erforderlich. Bei direktem Start einer einzelnen Datei aus
-einem anderen Arbeitsverzeichnis muss die Projektwurzel im Suchpfad liegen.
-Die PyCharm-Konfiguration markiert Projektwurzel und src als Quellverzeichnisse
-und verwendet Env_NN_AFM. Die Studiendatenbank wird über einen absoluten,
-projektbezogenen Pfad angebunden; optimization.db im Arbeitsverzeichnis wird
-vom aktuellen Optimierer nicht verwendet.
+Für die direkten Imports in src und tests fehlt kein Python-Paket. Alle festen
+Pins stimmen mit installierten Distributionsversionen überein. pytest 9.1.1 und
+Ruff 0.16.8 erfüllen die Bereiche; pywin32 312 und types-pywin32
+312.0.0.20261006 sind vorhanden. Das ist ein lokaler Abgleich, kein Nachweis einer
+frischen Installation oder vollständiger Konfliktfreiheit indirekter Pakete.
 
-Externe Voraussetzungen für Simulationen
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Indirekte Pakete wie psutil/openpyxl für PyMotorCAD, fonttools für Matplotlib
+und SQLAlchemy/PyYAML für Optuna deklarieren die jeweiligen Pakete selbst.
+Für direkte Imports sind keine zusätzlichen Einträge nötig. SQLAlchemy bleibt
+Optuna-Abhängigkeit trotz Journal-Speicher im Projekt. requests/idna/
+charset-normalizer sind der explizit gepflegte HTTP-Unterbau. sqlite3, tkinter
+und zoneinfo sind Standardbibliothek; scikit-learn wird nicht importiert.
 
-Benötigt werden eine lokale Motor-CAD-Installation mit verfügbarer Lizenz, eine
-passende .mot-Basisdatei und ein funktionierender Zugang zum Lizenzserver.
-Gegebenenfalls wird eduVPN für das Lizenznetz benötigt. Diese Anwendungen und
-die Basisdatei sind nicht Teil der Python-Umgebung; die Basisdatei liegt außerhalb
-des Projekts.
+Vorschläge für die unveränderten Umgebungsdateien:
+
+- plotly aus requirements.txt UND environment.yml und seaborn aus requirements
+  entfernen, sofern frühere externe Auswertungsskripte nicht unterstützt werden
+  sollen. Beide werden im aktuellen Projektcode nicht importiert.
+- pytest, Ruff und types-pywin32 optional in Entwicklungsabhängigkeiten auslagern.
+  pywin32 bleibt Laufzeitabhängigkeit. requirements-dev.txt existiert derzeit
+  nicht; aktuelle Installationsbefehle verwenden requirements.txt.
+- Gemeinsame Pins zentral pflegen und bewusst doppelte Conda-Vorgaben synchron
+  halten. Für exakte Wiederherstellung einen Lock-/Umgebungsexport vorsehen:
+  Werkzeugbereiche, Windows- und indirekte Pakete sind nicht komplett fixiert.
+- Kopfkommentare mit Datum 12.10.2026 sowie den überholten SQLite-Kommentar zur
+  Optuna-Speicherung aktualisieren; der Projektcode verwendet JournalStorage.
 
 
-3. Zentrale Konfiguration
--------------------------
+3. Konfiguration und Geometrieschema
+------------------------------------
 
-src/config/config_paths.py enthält aktuell:
+Externe Pfade in src/config/config_paths.py:
 
     PATH_MCAD_DATA        D:\MotorCAD
     PATH_MCAD_BASEFILE    D:\MotorCAD\base_first_data.mot
     PATH_MCAD_EXE         C:\Program Files\AnsysMotorCAD\v252\Motor-CAD_2025_2_1.exe
     PATH_eduVPN_EXE       C:\Program Files\eduVPN\Core\eduVPN.Client.exe
 
-Diese Werte an die lokale Installation anpassen. Datenpfade werden relativ zum
-Projekt ermittelt:
+data-Pfade werden aus dem Projektpfad ermittelt. Jeder Simulationslauf erhält
+unter D:\MotorCAD\temp_files einen eigenen Ordner, jeder Worker darin eine
+private MOT-Kopie mit unverändertem Originaldateinamen.
 
-    PATH_DATA_MCAD_RESULTS    data/MCAD_Results
-    PATH_TRAINING_DATA        data/Training_data
-    PATH_LOGS                 data/logs
-    PATH_DATA_PLOTS           data/plots
-    PATH_DATA_TRAINED_NN      data/trained_nn
+Aktuelle Vorgaben in config_mcad_parameters.py:
 
-PATH_TEMP_FILES bezeichnet temp_files. Jeder Simulationslauf erhält darunter
-einen eigenen Ordner D:\MotorCAD\temp_files\simulation_run_<ID>. Darin bekommt
-jede Motor-CAD-Instanz ein eigenes Unterverzeichnis mit einer Kopie der Basisdatei
-unter deren ursprünglichem Dateinamen. PATH_TEMP_DATA und
-PATH_DATA_MLP_RESEARCH_BASIC sind definiert, aber keine regulären Ausgabeziele
-der aktuellen Startskripte.
-
-src/config/config_mcad_parameters.py legt CSV-Spalten, MACHINE_DEFINITION,
-AXIS_LIST, MAP_SIZE, DEFAULT_VALUES und die Samplingbereiche fest:
-
-    MAP_SIZE              (5, 5, 5), also 125 Betriebspunkte je Geometrie
+    MAP_SIZE              (5,5,5), 125 Betriebspunkte je Kennfeld
     SLOT_NUMBER           18, fest
     POLE_NUMBER           12, fest
     AIRGAP                0,75 ... 3
-    STATOR_BORE            11 ... 100
-    SHAFT_SPEED_NORM       0,1 ... 1
-    D_CURRENT_DENSITY      -10 ... 0
-    Q_CURRENT_DENSITY      1 ... 25
+    STATOR_BORE           11 ... 100
+    SHAFT_SPEED_NORM      0,05 ... 1
+    Q_CURRENT_DENSITY     1 ... 25
+    D_CURRENT_DENSITY     -10 ... 0
 
-LAMBDA_MIN_MAX enthält neun (Minimum, Maximum)-Paare in LAMBDA_LIST-Reihenfolge.
-Einzelkonstanten wie LAMBDA_1_1 sind entfallen. Zuordnung zu den bisherigen Namen:
+Achsenreihenfolge in Generator, Datenlader und MAP_SIZE: normierte Drehzahl, q, d.
+AXIS_LIST: Shaft_Speed_norm, RMSPhaseCurrent_Q_density, RMSPhaseCurrent_D_density.
+Generator und DataLoader._recalculate_data berechnen:
 
-    Merkmal     Bisher         Bereich
-    lambda_1    lambda_1_1     0,2 ... 0,8
-    lambda_2    lambda_1_2     0,5 ... 0,9
-    lambda_3    lambda_1_3     0,2 ... 1,0
-    lambda_4    lambda_2_1     0,3 ... 0,7
-    lambda_5    lambda_2_2     0,1 ... 1,0
-    lambda_6    lambda_2_3     0,6 ... 1,0
-    lambda_7    lambda_3_1     0,0 ... 0,95
-    lambda_8    lambda_3_2     0,1 ... 0,4
-    lambda_9    lambda_3_3     0,2 ... 1,0
+    Shaft_Speed_norm = ShaftSpeed / (Stator_Lam_Dia * pi)
 
-Die Drehzahlachse ist jetzt Shaft_Speed_norm = ShaftSpeed / Stator_Lam_Dia.
-Der Generator setzt ShaftSpeed = Shaft_Speed_norm * Stator_Lam_Dia; die absolute
-Drehzahl hängt damit von der Geometrie ab. In der CSV bleibt ShaftSpeed erhalten.
-Die Normierung ist ein Quotient aus Drehzahl und Durchmesser in den verwendeten
-Motor-CAD-Einheiten und keine dimensionslose Skalierung auf eine Nenndrehzahl.
+Drehzahlstützstellen: 0,05; 0,2875; 0,525; 0,7625; 1.
+q-Stützstellen: 1; 7; 13; 19; 25. d-Stützstellen: -10; -7,5; -5; -2,5; 0.
+Zum abweichenden Rundungsabgleich siehe Abschnitt 10.
 
-Die neun Lambda-Werte beschreiben Geometrieverhältnisse. Maßgeblich sind die
-Berechnung in AFMMachineGenerator._calculate_geometric und die Rekonstruktion
-in DataLoader._recalculate_data; einzelne ältere Codekommentare weichen davon ab.
-DEFAULT_VALUES wird nicht vollständig in Motor-CAD gesetzt. Nicht vom Generator
-überschriebene Wicklungs-, Material- und Maschinenwerte stammen aus der Basisdatei.
-Die DEFAULT_VALUES-Schlüssel bestimmen unter anderem die ausgelesenen Prüfwerte.
+Zwölf Lambdas sind zentral in geometry/lambda_geometry.py definiert und werden
+in beide Richtungen umgerechnet. LAMBDA_BOUNDS enthält:
 
-Simulationsherkunft: config_paths.py enthält zusätzlich
-MCAD_DEPENDENCY_REVISION="materials_and_solver_2026_10_13" und
-MCAD_DEPENDENCY_FILES=(). Externe Material-/Solverdateien können in der Dateiliste
-für eine SHA-256-Prüfung erfasst werden. Nicht aufgeführte externe Abhängigkeiten
-werden nur durch die manuell gepflegte Revision repräsentiert; diese bei einer
-entsprechenden Änderung aktualisieren.
+    lambda_1     D_Si / D_Sa                             0,2 ... 0,8
+    lambda_2     Magnet_Arc_[ED] / 180                   0,5 ... 0,9
+    lambda_3     g / l_PM                               0,2 ... 1
+    lambda_4     s*b_S / (pi*D_Si)                      0,3 ... 0,7
+    lambda_5     b_S / d_S                              0,1 ... 1
+    lambda_6     h_PM / ((D_Sa-D_Si)/2)                  0,6 ... 1
+    lambda_7     d_emb / (radiale Breite-h_PM)           0 ... 0,95
+    lambda_8     2*p*(l_S-d_S)/(pi*(D_Sa+D_Si))          0,1 ... 0,4
+    lambda_9     l_PM / l_R                             0,2 ... 1
+    lambda_10    Slot_Opening / Slot_Width               0,1 ... 1
+    lambda_11    Tooth_Tip_Depth / Slot_Depth            0 ... 0,3
+    lambda_12    Slot_Corner_Radius / (Slot_Width/2)      0 ... 1
+
+s und p sind hier die Codewerte Slot_Number und Pole_Number. LambdaValues verlangt
+lambda_6 strikt kleiner als 1; 1 ist die obere Samplinggrenze.
+MACHINE_DEFINITION in geometry/feature_schema.py umfasst 14 Eingaben:
+
+    Airgap, Stator_Bore, lambda_1, ..., lambda_12
+
+Nur Airgap/Stator_Bore werden nach Konfigurationsgrenzen skaliert, Lambdas bleiben
+unverändert. Pol-/Nutzahl sind keine MLP-Eingaben und im Sampling fest.
+DEFAULT_VALUES wird nicht vollständig in Motor-CAD gesetzt. Weitere Maschinen-,
+Wicklungs- und Materialwerte stammen aus der MOT-Basisdatei; DEFAULT_VALUES
+benennt unter anderem ausgelesene Prüfwerte.
 
 
-4. Motor-CAD-Simulation
------------------------
+4. Simulation und Metadaten
+----------------------------
 
-Einstieg: src/executable_files/main_mcad_sim.py
+Nach Prüfung von Pfaden, Lizenz und gewünschtem Umfang:
 
     python -m src.executable_files.main_mcad_sim
 
-Aktueller SimulationPipeline-Aufruf:
+Aktuelle Kombinationen (B,L) in main_mcad_sim.py:
 
-    design_combinations=[(B, L) for B in (1, 5, 10, 15)
-                         for L in range(10, 300, 10)]
-    start_eduvpn=False
-    gen_type="v2"
-    num_workers=4
+    (1,100), (1,200), (1,300), (100,1), (200,1), (300,1),
+    (100,100), (200,200), (300,300)
 
-SimulationPipeline baut aus den Kombinationen SimulationJob-Objekte auf.
-SimulationSeries berechnet die Aufträge nacheinander; jede Kombination erhält
-eine eigene Ergebnis-CSV. Die Liste darf nicht leer sein und muss aus eindeutigen
-(B, L)-Tupeln mit positiven ganzen Zahlen bestehen. B bezeichnet jetzt die Anzahl
-der gesampelten Luftspalt-/Statorbohrungs-Kombinationen bei festen Pol-/Nutzahlen;
-die frühere Begrenzung durch verfügbare Nut-/Polpaare entfällt.
+gen_type="v2", num_workers=4, start_eduvpn=False; keine CLI-Optionen.
+B zählt Luftspalt-/Statorbohrungskombinationen, L gemeinsam gesampelte zwölf Lambdas.
+Latin-Hypercube-Seeds: 17 für B, 42 für L.
 
-MAP_SIZE wird zentral konfiguriert. num_workers wird auf verfügbare CPUs und je
-Auftrag auf die Punktzahl begrenzt. Eine Batch umfasst Workerzahl * 125 Punkte.
-Jeder Batch verwendet einen eigenen Prozesspool; jeder Worker öffnet eine
-temporäre Kopie des Basismodells in Motor-CAD.
+    Geometrien je Kombination:   B * L
+    Betriebspunktanforderungen:  B * L * prod(MAP_SIZE)
+    Gesamte Startliste:          141.200 Geometrien, 17.650.000 Punkte
 
-B = num_base_designs, L = num_lam_designs, P = Produkt der MAP_SIZE-Werte:
+Anforderungen vor Wiederverwendung/Verwerfung, keine garantierten Ergebniszeilen.
+Generator unterstützt nur v2. Pipeline enthält noch v1-Punktzählung und Standard
+gen_type="v1"; eigene API-Aufrufe müssen v2 setzen.
 
-    Variante    Geometrien      Vorgesehene Betriebspunkte
-    v2          B * L           B * L * P
+Kombinationen laufen nacheinander. SimulationSeries.prepare_output() prüft vorab
+Metadaten-Voraussetzungen. CSV und Sidecar entstehen erst unmittelbar vor der
+jeweiligen Kombination, nicht für die ganze Serie vorab. Workerzahl wird auf
+CPUs und Auftragspunktzahl begrenzt. Ein Batch umfasst workers * 125 Punkte.
+Jeder Batch erhält einen neuen ProcessPoolExecutor und jeder gestartete Worker
+eine eigene Motor-CAD-Instanz zur Begrenzung ihrer Lebensdauer aus Stabilitätsgründen.
 
-Der Maschinengenerator unterstützt nur noch v2; v1 löst einen ValueError aus.
-Die Punktzählung in SimulationPipeline enthält noch den alten v1-Zweig, daraus
-folgt keine Unterstützung im Generator. v2 soll alle neun Lambda-Werte gemeinsam
-per Latin-Hypercube-Sampling mit Seed 42 sampeln. Luftspalt und Statorbohrung
-werden gemeinsam mit Seed 17 gesampelt. Die offene Dimensionsanpassung des
-Lambda-Samplings ist in Abschnitt 9 beschrieben.
-Das Betriebspunktkennfeld ist ein äquidistantes kartesisches Raster aus normierter
-Drehzahl sowie d-/q-Stromdichte. Die aktuelle v2-Startkonfiguration plant 116
-Aufträge mit zusammen 16.856.250 Anforderungen vor Wiederverwendung und Verwerfung.
-Es werden 134.850 Geometrien angefordert; der erste Auftrag umfasst 1.250 Punkte,
-der letzte 543.750. Bei gleichen bekannten Punkten können Ergebnisse kopiert
-oder wiederverwendet werden. Den Umfang vor einem Start in main_mcad_sim.py prüfen.
+Standardname:
 
-Die gemeinsame Pipeline startet den Dienst automatisch und zeigt den Fortschritt
-im Tkinter-Fenster. Es gibt keinen Startknopf und kein autostart-Argument mehr.
-Die Oberfläche zeigt den Punktfortschritt des aktuellen Auftrags und einen
-zusätzlichen Gesamtfortschritt für abgeschlossene Kombinationen. Der Punktwert
-umfasst simulierte, verworfene, vorhandene und kopierte Anforderungen und wird
-für jede neue Kombination zurückgesetzt.
+    Results_EMagnetic_simulation_<B>_<L>_<MAP_SIZE[0]>_GenType-v2_<Datum_Zeit_Zone>_<ID>.csv
 
-Schließen während eines Laufs fordert jetzt einen Abbruch an, blendet das Fenster
-aus und lässt die Ereignisschleife während der Bereinigung weiterlaufen.
-CancellationToken wird an Serie, Simulation bzw. Optimierer weitergegeben.
-Der Simulationspool beendet bei Abbruch oder Fehler seine Worker mit kill_workers();
-der Optimierer beendet und bereinigt seine Suchprozesse. Ein CANCELLED-Ereignis
-markiert den Abbruch, anschließend wird PipelineCancelledError weitergegeben.
-Ein abgebrochener Suchlauf startet kein finales Training und keinen Export.
+Die Rasterzahl ist nicht die Gesamtpunktzahl. Sidecar: <Dateiname>.csv.meta.json.
+Parametertoleranz für bekannte Punkte: absolut 1e-4.
 
-Bei regulärem Abschluss bleibt das Fenster sichtbar. Es muss geschlossen werden,
-damit start() zurückkehrt und das finale Training in main_optimize.py beginnt.
-Dieses anschließende Training und der Export haben kein eigenes Abbruchfenster.
+    existing    Im eigenen Ziel vorhanden, keine neue Zeile
+    copied      Aus anderer kompatibler Quelle übernommen
+    simulated   Neu berechnet und gespeichert
+    dropped     Abgelehnte Geometrie/Rechnung, keine Ergebniszeile
 
-CSV-Ausgabe und Wiederverwendung
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Gleiche offene Punkte je Batch werden einmal berechnet, aber für alle Anforderungen
+gezählt. Zeilenfolge hängt von Workerfertigstellung ab. Cache-Suche liest nur CSVs
+direkt in MCAD_Results und ein explizit gewähltes bestehendes Ziel, keine Archive.
 
-Die Zieldatei erhält standardmäßig den Namen:
+Metadatenversion 2 bindet MOT-/EXE-Hashes, ansys-motorcad-core-Version, externe
+Abhängigkeitsrevision/-dateihashes sowie CSV-Schema und vier Nachkommastellen.
+Revision: materials_and_solver_2026_10_13; MCAD_DEPENDENCY_FILES ist leer.
+Indirekte Materialdateien werden nicht entdeckt. Quellcode-Hashes gehören nicht
+zum Simulationsfingerprint. Fachliche Änderungen außerhalb erfasster Dateien
+müssen über die Revision berücksichtigt werden. is_compatible_metadata verlangt
+identische Version-2-Payloads und gültige identische Fingerprints; keine gerichteten
+Freigabelisten mehr. Native kompatible Ziele sind über csv_paths fortführbar;
+Standardaufrufe erzeugen neue Namen. Ungültige Quellen werden übersprungen,
+ungültige Ziele führen zum Fehler. CSV und Sidecar gemeinsam aufbewahren.
 
-    Results_EMagnetic_simulation_<B>_<L>_<MAP_SIZE[0]>_GenType-v2_<Datum_Zeit_Zone>_<Lauf-ID>.csv
-
-Optional legt csv_paths genau einen Zielpfad je Kombination fest. Relative Pfade
-werden unter data/MCAD_Results aufgelöst; absolute Pfade sind ebenfalls möglich.
-Alle Ziele müssen verschieden sein und auf .csv enden. Eine bestehende Datei
-wird nur mit exakt aktuellem Fingerprint und passendem Inhalt fortgeführt.
-Neue Ausgaben erhalten zusätzlich eine Begleitdatei <Dateiname>.csv.meta.json.
-Die Simulation liest kompatible CSV-Dateien direkt aus dem Ergebnisordner, ohne
-Unterordner; ein ausdrücklich gewähltes vorhandenes Ziel außerhalb dieses Ordners
-wird zusätzlich einbezogen. Quellen ohne gültige Metadaten werden übersprungen.
-Eine bestehende Zieldatei ohne passende Metadaten führt beim Vorbereiten zu einem
-Fehler. Für eine neue CSV darf keine verwaiste .csv.meta.json-Datei existieren.
-
-Der Simulationsfingerprint verwendet Metadatenversion 2. Er umfasst SHA-256-Werte
-der .mot-Basisdatei und Motor-CAD-EXE, die Version von ansys-motorcad-core, die
-externe Abhängigkeitsrevision und eingetragene Abhängigkeitsdateien sowie CSV-Schema
-und Speicherpräzision. Quellcodedatei-Hashes gehören nicht mehr dazu; reine
-Formatierung ändert diesen Fingerprint deshalb nicht. Änderungen der fachlichen
-Simulationsannahmen müssen über Modell, Abhängigkeitsdateien oder Revision
-abgebildet werden. Die Begleitdatei wird auf JSON-Grundstruktur und ihren Payload-
-Hash geprüft. Wiederverwendungsquellen müssen kompatible Metadaten, dieselbe
-Spaltenreihenfolge und ausschließlich endliche
-numerische Werte besitzen. Die Herkunft wird vor dem Vorbereiten aller Aufträge
-und beim Aufbau der einzelnen Simulation ermittelt; dabei werden Basismodell,
-EXE und konfigurierte Abhängigkeitsdateien gelesen.
-
-is_compatible_metadata akzeptiert ausschließlich Version 2 mit vollständig gleichem
-Payload und dessen korrekt berechnetem Fingerprint. Die frühere Liste gerichteter
-Kompatibilitätsfreigaben ist entfernt. migrate_simulation_metadata() kann vorhandene
-Version-1-Sidecars nach Prüfung auf Version 2 umstellen: Nur implementation_hashes
-und die Versionsnummer dürfen sich unterscheiden, alle Setup-Angaben müssen passen.
-Ein vorhandener adoption-Vermerk bleibt erhalten. Standardmäßig prüft die Funktion
-nur; erst write=True schreibt geänderte Metadaten atomar. Die CSV wird dabei nicht
-verändert. Diese Funktion ist eine API und besitzt keinen eigenen CLI-Einstieg.
-
-Generierte Eingabeparameter werden mit absoluter Toleranz 1e-4 verglichen.
-Ein Treffer in der Zieldatei wird als existing gezählt; ein Treffer in einer
-anderen Datei wird als copied übernommen. Die Zieldatei hat beim Suchen Vorrang;
-weitere Quellen und Zeilen werden in fester Reihenfolge geprüft. _append_result()
-aktualisiert sowohl den Datenbestand im Speicher als auch den bekannten-Punkte-
-Cache. Die Batch-Verarbeitung enthält außerdem eine Zusammenfassung gleicher
-Anforderungen: Ein identischer Punkt wird je Batch nur einmal eingereicht, aber
-für alle zugehörigen Anforderungen im Fortschritt berücksichtigt. Einreichung
-und Ergebnisverarbeitung sind getrennt; alle abgeschlossenen Futures werden
-ausgewertet. Ein Batch ausschließlich bekannter Punkte benötigt keine neuen
-Simulationsaufträge.
-
-Die zehn direkt unter data/MCAD_Results vorhandenen Altdateien besitzen inzwischen
-Metadaten mit adoption.kind="legacy_assumption". Ihre ursprünglichen Setups sind
-damit ausdrücklich nicht verifiziert. Der Metadatenleser prüft zusätzlich den
-gespeicherten SHA-256-Wert der übernommenen CSV; spätere Änderungen werden erkannt.
-Übernommene Dateien dürfen nur als Cache-Quelle dienen und nicht als Ziel
-weitergeschrieben werden. Die Kopien unter Training_data benötigen für den
-DataLoader keine Simulationsmetadaten, besitzen im aktuellen Bestand aber ebenfalls
-Version-2-Begleitdateien.
-
-Randbedingungen werden vor der Magnetfeldrechnung geprüft. Erfolgreiche Punkte
-werden geschrieben; ungültige Designs und abgefangene Motor-CAD-Rechenfehler
-werden als dropped gezählt. Andere Worker-Fehler beenden den Dienst mit Exception.
-
-SimulationPipeline.start() entfernt abschließend ausschließlich den für diesen
-Lauf erzeugten simulation_run_-Ordner. Andere Läufe und fremde Dateien unter
-temp_files bleiben erhalten. Bereinigungsfehler werden protokolliert. Motor-CAD-
-Worker registrieren einen multiprocessing-Finalizer und räumen ihre Instanz auch
-nach Initialisierungs-/Rechenfehlern auf. Unter Windows bindet worker_job.py jeden
-Motor-CAD-Worker an ein eigenes Jobobjekt mit KILL_ON_JOB_CLOSE. Beim Beenden des
-Workers werden dadurch seine Kindprozesse ebenfalls beendet; unabhängige Prozesse
-gehören nicht zu diesem Job. Dafür muss pywin32 installiert sein.
-Bei start_eduvpn=True wird eine laufende eduVPN-Anwendung beendet und neu
-gestartet; der gestartete Prozessbaum wird
-abschließend beendet. Ein laufender eduVPN-Prozess bestätigt keine erfolgreiche
-VPN- oder Lizenzverbindung.
-
-Alte Ergebnisdateien ausdrücklich übernehmen
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Einstieg: src/executable_files/main_adopt_legacy_csv.py
+Altdatei-Einstieg:
 
     python -m src.executable_files.main_adopt_legacy_csv
 
-Vorher CSV_PATH, MOT_SHA256 und REASON im Skript prüfen. CSV_PATH verweist aktuell
-auf Results_EMagnetic_simulation_10_10_5_GenType-v2_12.10.2026_21-45-45_CEST.csv
-unter MCAD_Results. Der konfigurierte MOT-Hash muss zum aktuellen Basismodell passen.
-Auch EXE und konfigurierte externe Abhängigkeiten müssen lesbar sein.
+CSV_PATH, MOT_SHA256 und REASON werden im Skript eingestellt. Es schreibt direkt,
+kann Sidecars ersetzen und hat keine Dry-Run-CLI. Die CSV bleibt unverändert.
+adoption speichert CSV-Hash, Begründung, UTC-Zeit und original_setup_verified=False:
+historische Annahme, keine nachträglich verifizierte Herkunft.
 
-Der Einstieg besitzt keine CLI-Optionen und keine Vorschau: Er validiert Header,
-endliche Werte, mindestens eine Ergebniszeile und den während der Prüfung
-unveränderten CSV-Hash, schreibt die Metadaten direkt neu und liest sie zur
-Kontrolle zurück. Eine vorhandene Begleitdatei kann dabei ersetzt werden.
-Die CSV selbst bleibt unverändert. Der adoption-Vermerk enthält Begründung,
-UTC-Zeit, CSV-Hash und original_setup_verified=False. Die historische Herkunft
-wird damit weiterhin als Annahme festgehalten.
-
-Die separate API adopt_legacy_csv() ist weiterhin vorhanden. Sie verlangt
-accept_setup_assumption=True, eine nicht leere Begründung und einen passenden
-confirmed_mot_hash; sie überschreibt keine vorhandene Begleitdatei und schreibt
-erst bei write=True. Diesen API-Modus nicht mit dem direkten Einstieg verwechseln.
+Separate API adopt_legacy_csv(): verlangt Setup-Annahme, Begründung, passenden
+MOT-Hash; lehnt vorhandene Sidecars ab und schreibt erst mit write=True.
+Adoptierte Dateien sind nur Cache-Quellen; gespeicherter CSV-Hash muss passen.
+migrate_simulation_metadata() prüft Version 1 -> 2 bei ansonsten gleichem Setup
+und schreibt erst mit write=True. Das ergänzt keine fehlenden CSV-Spalten.
 
 
-5. CSV-Daten und Optimierung starten
+5. CSV-Auswahl und Datenaufbereitung
 ------------------------------------
 
-CSV-Format: UTF-8, Semikolon als Spaltentrenner, Komma als Dezimaltrennzeichen,
-vier Nachkommastellen bei geschriebenen Floatwerten. Jede erfolgreiche Rechnung
-liefert eine Zeile. Die Reihenfolge hängt von der Fertigstellung der Worker ab.
+Format: UTF-8, Semikolon, Dezimalkomma, vier Nachkommastellen für Floatausgaben.
+CSV_PARAMETERS umfasst aktuell 39 Spalten:
 
-CSV_PARAMETERS umfasst 29 Spalten in dieser Reihenfolge:
-
-    Geometrie (16):
+    Geometrie/Wicklung (26):
     Pole_Number, Slot_Number, Airgap, Stator_Bore, Stator_Lam_Dia,
     AFM_D_Rotor, Magnet_Arc_[ED], Magnet_Length, Magnet_Thickness,
-    Slot_Depth, Slot_Width, Slot_Opening, Magnet_Embed_Depth,
-    Rotor_Lam_Length, Stator_Lam_Length, Motor_Length
+    CircumferentialSegments, Slot_Depth, Slot_Width, Slot_Opening,
+    Slot_Corner_Radius, Tooth_Tip_Depth, Magnet_Embed_Depth,
+    Rotor_Lam_Length, Stator_Lam_Length, Motor_Length, MagPhases,
+    MagTurnsConductor, MagThrow, ParallelPaths, WindingLayers,
+    MagWindingOffset, NumberOfCoils
 
     Betriebspunkt (6):
     ShaftSpeed, RMSPhaseCurrent_D, RMSPhaseCurrent_Q,
     RMSCurrentDensity, PeakCurrent, PhaseAdvance
 
-    Ergebnisse (7), zugleich OUTPUT_NEURON_LIST:
+    Ergebnisse (7), zugleich Kanalreihenfolge:
     ShaftTorque, SystemEfficiency, BMean_AirGap, ConductorLoss,
     MagnetLoss, StatorIronLoss_Total, RotorIronLoss_Total
 
-Direkt in data/Training_data lagen beim Bestandsabgleich am 20.10.2026:
+Training verlangt alle Spalten und ordnet sie intern; Zusatzspalten werden nicht
+übernommen. Simulation prüft auch die exakte Reihenfolge.
 
-    Dateiname                                                               Datenzeilen
-    Results_EMagnetic_simulation_1_10_5_GenType-v2_04.10.2026_19-31-19_CEST.csv     1.250
-    Results_EMagnetic_simulation_1_20_5_GenType-v2_04.10.2026_19-33-27_CEST.csv     2.375
-    Results_EMagnetic_simulation_1_30_5_GenType-v2_04.10.2026_19-41-31_CEST.csv     3.500
-    Results_EMagnetic_simulation_1_40_5_GenType-v2_04.10.2026_20-06-28_CEST.csv     5.000
-    Results_EMagnetic_simulation_1_50_5_GenType-v2_06.10.2026_17-00-36_CEST.csv     6.125
+Direkt in Training_data liegen beim Abgleich:
 
-Die Trainingskopie der 1_40_5-Datei ist inzwischen gefüllt. MCAD_Results enthält
-zusätzlich unter anderem den v1-Datensatz vom 18.09.2026 mit 10.000 Zeilen sowie
-die v2-Dateien 10_1_5, 19_1_5, 5_5_5 und 10_10_5. Zeilenzahlen allein bestätigen
-keine gültigen oder unabhängigen Kennfelder. Unterordner werden nicht automatisch
-nach Trainings- oder Testdaten durchsucht.
+    Results_EMagnetic_simulation_1_10_5_GenType-v2_26.10.2026_16-14-42_CET_99d7fc38.csv
+    Results_EMagnetic_simulation_1_20_5_GenType-v2_26.10.2026_16-14-42_CET_99d7fc38.csv
 
-Einstieg: src/executable_files/main_optimize.py
+Kopfzeilen und Sidecars haben noch 29 Spalten. Es fehlen CircumferentialSegments,
+Slot_Corner_Radius, Tooth_Tip_Depth, MagPhases, MagTurnsConductor, MagThrow,
+ParallelPaths, WindingLayers, MagWindingOffset und NumberOfCoils. Radius/Zahntiefe
+sind für neue Lambdas nötig. Vorschlag: kompatible neue Daten oder belegte Migration
+mit historisch nachgewiesenen Werten vorsehen. Fehlendes nicht pauschal mit heutigen
+DEFAULT_VALUES ergänzen. Sidecar-Migration allein behebt diese Inkompatibilität nicht.
 
-    python -m src.executable_files.main_optimize --csv Results_EMagnetic_simulation_1_10_5_GenType-v2_04.10.2026_19-31-19_CEST.csv
+--csv wählt eine Hauptdatei direkt unter Training_data. Alle anderen CSVs dort
+werden alphabetisch als unabhängige Testquellen gewählt. Keine Unterordner/Sidecars
+als Datenquelle. --test-csv existiert nicht mehr. Im Kombimodus werden Dateien
+mit dem Hash der ursprünglichen CNN-Hauptquelle zusätzlich von Tests ausgeschlossen.
+Auswahl wird geloggt; ohne weitere CSV ist test=None. Nur bewusst ausgewählte
+kompatible Quellen im Ordner belassen. Umbenennen beseitigt keine Überschneidungen.
+write_from_csv_in_csv() kopiert auch Kopfzeilen und ist kein validierender Export.
 
---csv wählt die Hauptquelle unter data/Training_data. Der Einstieg wählt alle
-anderen .csv-Dateien direkt in diesem Ordner automatisch und alphabetisch sortiert
-als Testquellen. Die Hauptdatei wird anhand ihres aufgelösten Pfads ausgeschlossen;
-.csv.meta.json-Dateien werden ignoriert. Hauptquelle und Testauswahl werden geloggt.
-Die frühere Option --test-csv entfällt.
+DataLoader.load():
 
-Der DataLoader selbst erhält weiterhin eine explizite test_filenames-Liste; die
-Automatik sitzt im Startskript. Trainingsdateien werden nicht aus MCAD_Results
-kopiert. Für einen Versuch deshalb nur passende, unabhängige CSV-Dateien direkt
-in Training_data bereitstellen. Dateien ohne gültige Kennfelder, überschneidende
-Maschinen oder doppelte Maschinen zwischen Testquellen werden abgelehnt und
-nicht stillschweigend übersprungen. Ohne weitere CSV ist test=None.
+1. Hash, Spalten und endliche Werte prüfen, Geometrie validieren, zwölf Lambdas
+   rekonstruieren. Leiterfläche aus PeakCurrent/RMSCurrentDensity, q-/d-Stromdichte
+   und normierte Drehzahl berechnen.
+2. Drehzahl-/Stromdichte-Rundungsabgleich auf Referenzraster anwenden; nur eindeutig
+   durch CSV-Rundung erklärbare Zuordnungen sind vorgesehen.
+3. Nach MACHINE_DEFINITION gruppieren. Doppelte, fehlende oder zusätzliche Punkte
+   verwerfen das ganze Kennfeld. Keine Interpolation. Leere Restquellen scheitern.
+4. Tensoren: geometry_tensor (N,14), map_tensor (N,5,5,5,7).
+   Kennfelddimensionen: Maschine, normierte Drehzahl, q, d, Ergebniskanal.
+5. Hauptquelle nach ganzen Maschinen ca. 80/20 teilen, fest Seed 42; mindestens
+   fünf vollständige Maschinen. Testquellen verbinden. Exakte Geometrie-IDs dürfen
+   sich zwischen Splits nicht überschneiden, doppelte Testmaschinen scheitern.
+   IDs basieren auf unnormalisierten float32-Eingaben, keine Ähnlichkeitsprüfung.
+6. Airgap/Stator_Bore nach Konfigurationsgrenzen skalieren. Zielwerte je Kanal mit
+   ausschließlich Trainingsminima/-spannweiten normalisieren, Nenner >=1e-8.
 
-Kommandozeilenoptionen:
-
-    --csv DATEI             Erforderlicher .csv-Dateiname ohne Verzeichnispfad
-    --seed ZAHL             Standard 42
-    --trials ZAHL           Standard 1000; Zahl der Trials je Suchworker
-    --worker-timeout SEK    Optionales Gesamtzeitbudget für die Suchworker
-
-Aktuelle Trainings- und Suchraumvorgaben in main_optimize.py:
-
-    max_num_neuron_per_layer=200
-    max_num_layers=3
-    neuron_step=5
-    num_kernel=4
-    learning_rate=0.001
-    patience=100
-    num_epochs=2000
-    weight_decay=0.001
-
-Die Workerzahl wird auf die verfügbaren CPUs begrenzt. Bei vier Workern ergeben
-1.000 Trials je Worker insgesamt 4.000 Architekturversuche mit je sieben MLP-
-Teilmodellen, also 28.000 Teilmodell-Trainings. Danach folgen sieben zusätzliche
-Trainings für das finale Modell der besten Architektur. --trials verändert die
-Zahl je Worker, nicht die Summe aller Prozesse. Die Fortschrittsanzeige zählt
-abgeschlossene Trials; ihr Maximum ist n_trials * Workerzahl.
-
---seed wird an Suchworker und finales Training weitergegeben. --worker-timeout
-begrenzt den gesamten Suchworker-Lauf einschließlich Prozessstart, nicht einzelne
-Trials, Datenaufbereitung oder finales Training. Eine Überschreitung beendet die
-Suche mit TimeoutError und löst die Workerbereinigung aus. Die Datenaufbereitung
-findet bereits beim Aufbau der Pipeline statt, vor dem GUI-Start.
-
-Nach regulärem Suchende das Fortschrittsfenster schließen. Erst danach trainiert
-main_optimize.py das finale Modell, wertet Validierung und Testdaten aus, speichert
-das Modell, lädt es zur Vorhersagekontrolle erneut und erzeugt Auswertungsdatei,
-Einzelplots und PDF-Bericht. Ein Abbruch der Suche überspringt diese Folgeschritte.
+Validation/Test können außerhalb [0,1] liegen. Split/Shuffle nutzen Seed 42
+unabhängig von --seed. CSVs bleiben unverändert; Trainings-Sidecars werden nicht geprüft.
 
 
-6. Datenaufbereitung und Modelle
---------------------------------
+6. main_optimize.py: drei Modellvarianten
+-----------------------------------------
 
-DataLoader prüft das CSV-Schema sowie endliche Quellwerte. PeakCurrent,
-RMSCurrentDensity, Stator_Bore, Stator_Lam_Dia, Magnet_Length, Slot_Depth und
-Rotor_Lam_Length müssen positiv sein. Radiale Breite und radiale Breite abzüglich
-Magnet_Thickness müssen ebenfalls positiv sein. Daraus werden Leiterfläche,
-normierte Drehzahl, d-/q-Stromdichten und die neun Lambda-Verhältnisse berechnet.
+Platzhalter durch vorhandene schema-/rasterkompatible Dateien ersetzen.
+Referenzmodell mit kleinem Suchumfang:
 
-MACHINE_DEFINITION legt die 13 Geometriemerkmale in dieser Reihenfolge fest:
+    python -m src.executable_files.main_optimize --csv "TRAIN.csv" --network-type MLP --trials 1 --max_layer 1 --max_neuron 10 --unit_step 10
 
-    Slot_Number, Pole_Number, Airgap, Stator_Bore,
-    lambda_1, lambda_2, lambda_3, lambda_4, lambda_5,
-    lambda_6, lambda_7, lambda_8, lambda_9
+CNN-Sammlung:
 
-Kennfeldachsen in AXIS_LIST:
+    python -m src.executable_files.main_optimize --csv "CNN_TRAIN.csv" --network-type CNN --trials 1 --max_layer 1 --max_neuron 10 --unit_step 10
 
-    Shaft_Speed_norm, RMSPhaseCurrent_D_density, RMSPhaseCurrent_Q_density
+Kombimodell:
 
-Das Referenzraster des DataLoaders verwendet MAP_SIZE in der Reihenfolge
-(normierte Drehzahl, d-Stromdichte, q-Stromdichte). Die aktuellen Stützstellen sind:
+    python -m src.executable_files.main_optimize --csv "MLP_TRAIN.csv" --network-type MLP --autoencoders "data\trained_nn\AutoencoderCollections\LAUF\AutoencoderCollection.pt" --trials 1 --max_layer 1 --max_neuron 10 --unit_step 10
 
-    Shaft_Speed_norm             0,1; 0,325; 0,55; 0,775; 1,0
-    RMSPhaseCurrent_D_density    -10; -7,5; -5; -2,5; 0
-    RMSPhaseCurrent_Q_density    1; 7; 13; 19; 25
+Argumente:
 
-Die Stromdichte-Referenzachsen werden auf 0,05 gerundet; rekonstruierte
-Stromdichten werden nicht pauschal so gerundet. _align_current_density_grid()
-prüft, ob die CSV-Rundung auf vier
-Nachkommastellen die Abweichung von einem Rasterwert erklären kann: Aus den
-Rundungsintervallen von Phasenstrom, Stromdichte und Spitzenstrom wird ein
-möglicher Wertebereich bestimmt. Nur bei genau einem passenden Referenzwert
-wird der Wert diesem Rasterpunkt zugeordnet. Andere Abweichungen bleiben bestehen.
-_align_speed_grid() bietet einen entsprechenden Abgleich aus ShaftSpeed und
-Stator_Lam_Dia, wird von load() aktuell jedoch noch nicht aufgerufen.
+    --csv DATEI              Pflicht: CSV-Dateiname ohne Verzeichnispfad
+    --network-type MLP|CNN   Standard MLP
+    --autoencoders PFAD      Optionale CNN-Sammlung, nur mit MLP
+    --max_layer ZAHL         Maximale versteckte Schichtzahl, Standard 5
+    --max_neuron ZAHL        Maximale Neuronen-/Featurezahl, Standard 500
+    --unit_step ZAHL         Kandidaten-Schrittweite, Standard 10
+    --seed ZAHL              Standard 42
+    --trials ZAHL            Weitere Trials je Worker UND Kanal, Standard 4000
+    --worker-timeout SEK     Workerzeitbudget je Kanal, optional
 
-Jede Maschine muss das vollständige kartesische Referenzraster besitzen. Doppelte
-Punkte sowie fehlende oder zusätzliche Achsenkombinationen entfernen die ganze
-Maschine. Dateien ohne verbliebenes gültiges Kennfeld werden abgelehnt.
-Fehlende Kennfeldwerte werden nicht interpoliert.
+Unterstriche gehören zu --max_layer, --max_neuron und --unit_step.
+Fest im Einstieg: learning_rate=0.001, weight_decay=0.001, num_epochs=2000,
+patience=100, num_kernel=4. Workerzahl wird auf CPUs begrenzt. Sieben Kanäle
+laufen nacheinander, pro Kanal bis zu vier Suchworker. Bei vier Workern bedeutet
+--trials 1 insgesamt 28 Suchtrainings plus sieben finale Trainings. Standard
+4000 plant 112.000 Suchtrainings plus sieben finale Trainings. Ein kleines
+Trialbudget begrenzt nicht die 2000 möglichen Epochen je Training.
 
-Tensorformen beim aktuellen Raster:
+MLP sucht 1 bis max_layer ReLU-Schichten mit unit_step, 2*unit_step, ... bis
+max_neuron Neuronen, Ausgabe linear. CNN sucht strikt steigende Featurezahlen
+und latente Dimension 1 bis 50, einkanalige Conv3d-Encoder/Decoder, Kernel 3.
+MLP bewertet vollständigen normalisierten Validierungs-MSE, CNN vollständigen
+Rekonstruktions-MSE. Kombimodell: CNNs eingefroren, MLPs liefern latente Decoder-
+eingaben. Verlust für Suche/Training verwendet 3*3*3 Stützstellen (Anfang/Mitte/
+Ende jeder Achse); Endauswertung verwendet vollständige Kennfelder.
 
-    geometry_tensor    (N, 13)
-    map_tensor         (N, 5, 5, 5, 7)
+Kombidaten werden auf gespeicherte CNN-Zielskalierung umgerechnet. Achsen, Form
+und Herkunft werden geprüft. Testmaschinen dürfen weder im CNN-Training noch
+in dessen Validierung vorkommen. metrics.training_csv und ihr Quellenhash müssen
+die CNN-Hauptquelle identifizieren. Kombibundle enthält auch CNN-Gewichte/Herkunft.
 
-Die Hauptdatei wird nach ganzen Maschinen mit festem Seed 42 in ca. 80 Prozent
-Training und 20 Prozent Validierung geteilt. Mindestens fünf vollständige
-Maschinen werden benötigt. Die übrigen, vom Einstieg ausgewählten Dateien werden
-zum Testsatz verbunden. Geometrie-IDs basieren auf den unnormalisierten float32-
-Eingaben. Zwischen Training, Validierung und Test sind keine identischen IDs
-erlaubt; auch Testquellen untereinander dürfen keine doppelten Maschinen enthalten.
-Diese Prüfung erkennt exakte Identität, keine geometrische Ähnlichkeit.
+NNTrainer: CPU, Adam, kompletter Trainingsdatensatz pro Schritt. Early Stopping
+verlangt mindestens 1e-6 Verbesserung und stellt den besten Validierungszustand
+wieder her. Nicht endliche Verluste/Gradienten brechen ab. Testdaten steuern weder
+Architekturwahl noch Early Stopping.
 
-Normalisierung:
+Nach allen Kanalsuchen erstellt OptimizationService neue Netze mit den jeweils
+besten Architekturen und trainiert sie INNERHALB der Pipeline. Trialgewichte
+werden nicht dauerhaft übernommen. Finale Trainings laufen noch mit geöffnetem
+Fortschrittsfenster. Nach regulärem Ende Fenster schließen; pipeline.start()
+liefert das trainierte SurrogateModel oder die AutoencoderCollection. Danach
+folgen Speichern, erneutes Laden zur Kontrolle, Auswertung und Diagrammexport.
 
-- _normalize_geo_tensor() erwartet für die vier Grundmerkmale Wertepaare in
-  GEO_PARAMETERS_MIN_MAX_DICT und berechnet (Wert - Minimum) / (Maximum - Minimum).
-  Die festen Ganzzahlen für Slot_Number und Pole_Number sind damit aktuell noch
-  nicht kompatibel; siehe Abschnitt 9.
-- Die neun Lambda-Verhältnisse bleiben unverändert.
-- Kennfelder werden je Kanal mit Minimum und Maximum ausschließlich der
-  Trainingsdaten skaliert. Validierung und Test verwenden dieselben Werte.
-
-Werte außerhalb der Trainingsgrenzen können außerhalb von [0, 1] liegen.
-TrainValidationTestDataTensors enthält neben den Datenteilen map_axes,
-target_minimum, target_denominator, split_machine_ids und source_hashes.
-Der Nenner ist die auf mindestens 1e-8 begrenzte Trainingsspannweite.
-
-MLP-Surrogatmodell und Architektur-Suche
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Optuna wählt ein bis drei versteckte Schichten mit jeweils 5, 10, ..., 200
-Neuronen. Versteckte Schichten verwenden ReLU, die Ausgabeschicht ist linear.
-Jedes MLP erhält 13 Geometriemerkmale und liefert 125 Werte, umgeformt auf
-(N, 5, 5, 5, 1). Betriebspunkte sind durch das feste Raster vorgegeben und keine
-zusätzlichen MLP-Eingaben. SurrogateModelTrainer trainiert je Ergebnisgröße ein
-eigenes Teilmodell derselben Architektur. SurrogateModel.get_prediction verbindet
-die sieben Ausgaben in OUTPUT_NEURON_LIST-Reihenfolge.
-
-NNTrainer arbeitet auf der CPU mit Adam und MSE. Pro Optimierungsschritt wird
-der gesamte Trainingsdatensatz verwendet; es gibt keine Mini-Batch-Aufteilung.
-main_optimize.py setzt patience=100; der allgemeine NNTrainer-Standard bleibt 50.
-Early Stopping verlangt eine Verbesserung von mindestens 1e-6 und stellt die
-Gewichte mit dem besten Validierungsverlust wieder her. Leere oder unpassende
-Ziel-/Vorhersagetensoren werden abgelehnt. Nicht endliche Verluste oder Gradienten
-führen zu FloatingPointError; ungültige Gradienten erhalten keinen Optimiererschritt.
-
-Split und Shuffle verwenden fest Seed 42, unabhängig von --seed. Die Suchworker
-setzen Python-, NumPy-, PyTorch- und TPE-Seeds; das Objective setzt einen
-Trial-abhängigen PyTorch-Seed. Jeder Suchworker verwendet einen PyTorch-Thread.
-Das finale Training setzt die drei Zufallsseeds erneut anhand von --seed.
-Parallele Trialreihenfolge und fortgesetzte TPE-Läufe sind damit nicht als
-bitgleich reproduzierbar zugesichert.
-
-Optuna minimiert den MSE normalisierter Validierungskennfelder. Testdaten fließen
-nicht in die Architekturwahl ein. R² wird je Kanal und als ungewichteter Mittelwert
-berechnet. Ein konstanter Referenzkanal ergibt im R2Report None, dann ist auch das
-Gesamtmittel None. Die strengere Funktion calc_r_squared löst in diesem Fall
-ValueError aus. Metrikfunktionen prüfen Tensorformen, leere und nicht endliche Werte.
-
-Optionaler Autoencoder
-~~~~~~~~~~~~~~~~~~~~~~
-
-Conv3dAutoencoder und der zusätzliche Trainingszweig sind weiterhin vorhanden.
-Ein passend konfigurierter einkanaliger Autoencoder wird zuerst je Kanal auf
-Kennfeldrekonstruktion trainiert und dann eingefroren. Das MLP lernt dessen
-latenten Raum; bewertet werden 3 x 3 x 3 Stützstellen des dekodierten Kennfelds.
-MLP-Ausgabe und latent_dim müssen passen. Der aktive Optuna-Ablauf verwendet
-keinen Autoencoder, sondern direkte MLP-Vorhersagen vollständiger Kennfelder.
+--worker-timeout begrenzt die Suchworkerwartephase pro Kanal inklusive Prozessstart,
+nicht Gesamtlauf, Einzeltrial oder finale Trainings. Abbruch wird im finalen
+Training zwischen Kanälen geprüft, nicht innerhalb der NNTrainer-Epochenschleife.
 
 
-7. Studien, Modelle und Auswertungsdateien
-------------------------------------------
+7. Studien, Modelle, Auswertung und Anwendung
+---------------------------------------------
 
-NNOptimizer verwendet:
+Aktueller Optuna-Speicher:
 
-    data/optimization/<Fingerprint>/study.sqlite3
+    data/optimization/<Fingerprint>/study.journal
     Studienname: <Fingerprint>
 
-Der Fingerprint bindet Quellenhashes, Split-IDs, Achsen, Skalierung, Merkmals-/
-Kanalreihenfolge, Workerzahl, Trainingsparameter, Suchraum, Seed, Python-/
-Paketversionen und ausgewählte Implementierungsdateien. Trialzahl und Worker-
-Zeitbudget gehören nicht dazu. Anders als beim Simulationsfingerprint enthalten
-Optimierungsfingerprints weiterhin Quellcode-Hashes und ändern sich bei Formatierung.
+Worker teilen JournalStorage mit JournalFileBackend und JournalFileOpenLock.
+Kanalangabe erzeugt einen Fingerprint je Kanal. Er bindet Datenhashes, Splits,
+Achsen, Skalierung, Features/Kanäle, Modelltyp, ggf. feste CNN-Gewichte, Suchraum,
+Training, Workerzahl, Seed, Python-/Paketversionen und ausgewählte Quelldateien.
+Trialbudget/Zeitlimit gehören nicht dazu. experiment_fingerprint/experiment_config
+stehen in Studienattributen; keine separate Konfigurations-JSON. Gleicher
+Fingerprint ergänzt Trials; beste Architekturen können aus früheren Aufrufen
+stammen. Studien speichern keine Netzgewichte. R² ist kein aktuelles Trialattribut;
+ChannelOptimizationResult.r_squared wird auf None gesetzt. Die ältere Klasse
+OptimizationResult ist nicht der aktuelle Pipeline-Rückgabewert.
 
-_prepare_study() legt die Studie mit load_if_exists=True an oder öffnet sie.
-experiment_fingerprint und experiment_config werden als Studienattribute abgelegt.
-Bestehende Trials ohne Experimentkennung oder mit fremdem Fingerprint werden
-abgelehnt. Bei gleichem Fingerprint werden weitere Trials ergänzt; die beste
-Architektur kann aus einem früheren Aufruf derselben Studie stammen.
-OptimizationPipline.start() liefert hidden_layers, mse, r_squared und trial_number.
+Historische study.sqlite3-Dateien werden nicht automatisch ins Journal migriert.
+Abgebrochene Einzeltrainings werden nicht fortgesetzt. Parallele TPE-Suche und
+Fortsetzungen sind nicht als bitgleich reproduzierbar zugesichert. Anders als
+Simulationsfingerprints enthalten Optimierungsfingerprints Quellcode-Hashes.
 
-Ein erfolgreicher main_optimize-Lauf erzeugt einen eigenen Ordner:
+Neue Modellpfade:
 
-    data/trained_nn/<JJJJMMTT_HHMMSS>_<achtstellige ID>/
-    |-- surrogate.pt
-    |-- evaluation.pt
-    '-- result_plots/
-        |-- <Kanal>_prediction_vs_sim_ref-model.png
-        |-- <Kanal>_prediction_vs_sim_ref-model.pdf
-        '-- prediction_report.pdf
+    data/trained_nn/Reference_model/<Zeitstempel>_<ID>/SurrogateModel.pt
+    data/trained_nn/Combi_model/<Zeitstempel>_<ID>/SurrogateModel.pt
+    data/trained_nn/AutoencoderCollections/<Zeitstempel>_<ID>/AutoencoderCollection.pt
 
-Modellbundle
-~~~~~~~~~~~~
+Jeder vollständig exportierte Lauf enthält daneben:
 
-save_bundle() schreibt surrogate.pt über eine temporäre Datei atomar. Es enthält
-Architektur, sieben CPU-state_dicts, Merkmals-/Kanalnamen, Geometriegrenzen,
-Achsen, Zielskalierung, Split-IDs, Quellenhashes, Seed und Kennzahlen einschließlich
-training_config. Das Format unterstützt direkte MLPs aus Linear-/ReLU-Schichten,
-keine Autoencoder. Die SQLite-Studie selbst enthält keine Netzgewichte.
+    evaluation.pt
+    result_plots/<Kanal>_prediction_vs_sim_ref-model.png  (7 Dateien)
+    result_plots/<Kanal>_prediction_vs_sim_ref-model.pdf  (7 Dateien)
+    result_plots/prediction_report.pdf
 
-load_bundle() lädt auf der CPU mit weights_only=True, prüft Pflichtfelder,
-Format, Modelltyp, Merkmals-/Kanal-/Achsenreihenfolge, endliche Skalierungswerte
-mit positivem Nenner und zur Achsengröße passende Ausgabedimensionen.
-Netzgewichte werden mit strict=True
-übernommen. Der Einstieg vergleicht anschließend die Validierungsvorhersagen des
-neu geladenen Modells mit denen des gespeicherten Modells per assert_close.
-predict_raw_geometry() erwartet unnormalisierte Eingaben (N, 13) in gespeicherter
-Merkmalsreihenfolge und liefert Kennfelder in physikalischer Skalierung.
+Modelle/evaluation.pt werden atomar über temporäre Dateien ersetzt. Bei späterem
+Plotfehler können beide vollständig vorliegen. Sieben Netze werden gemeinsam
+gespeichert. SurrogateModel.pt: Format 2 mit individueller Architektur/Gewichten
+je Kanal, optionalen CNN-Decodern, Features, Kanälen, Geometriegrenzen, Achsen,
+Zielskalierung, Split-IDs, CSV-Hashes, Seed, Metriken und Trainingsdauern.
+AutoencoderCollection.pt: Sammlungsformat 1. Loader nutzen CPU, weights_only=True
+und Struktur-/Gewichtsprüfungen. Alte surrogate.pt-Bundles mit Surrogatformat 1
+unterstützt load_bundle() nicht; keine automatische Migration.
 
-evaluate_surrogate() liefert normalisierten MSE, R² je Kanal und als Mittelwert
-sowie MAE und MSE je Kanal in physikalischer Skalierung. Die Fehler werden mit
-target_denominator rückskaliert; Größen verschiedener Einheiten werden dabei
-nicht zu einem gemeinsamen physikalischen Fehlerwert vermischt.
+evaluation.pt hat Format 2: prediction oder reconstruction. Es enthält
+Maschinen-IDs, normalisierte Geometrieeingaben, physikalische Referenz-/Modell-
+kennfelder je Split, Metriken, Achsen, Kanäle, Datenhashes und Modellname/-hash.
+value_scale="physical" gilt für Kennfelder; Geometrie bleibt normalisiert.
+Metriken: normalisierter Gesamt-MSE, R² je Kanal und ungewichtetes Mittel,
+physikalischer MAE/MSE je Kanal. Konstante Referenzkanäle ergeben R²=None und
+kein definiertes Gesamt-R². Unterschiedliche Einheiten werden nicht zu einem
+physikalischen Gesamtfehler vermischt.
 
-Gespeicherte Auswertung
-~~~~~~~~~~~~~~~~~~~~~~
+Einzelplots und A4-Querformatbericht zeigen Referenz gegen Vorhersage bzw.
+Rekonstruktion. Bericht prüft Modellhash, verlangt sieben Kanäle und Training/
+Validation, kennzeichnet fehlende Tests und zeigt Kanalarchitekturen,
+Trainingsparameter und Summe der Netztrainingszeiten, nicht Gesamtprogrammlaufzeit.
 
-save_evaluation() schreibt evaluation.pt neben surrogate.pt. Gespeichert werden
-für Training, Validierung und gegebenenfalls Test:
-
-- Maschinen-IDs und normalisierte Geometrieeingaben,
-- Modellvorhersagen und Motor-CAD-Referenzkennfelder in physikalischer Skalierung,
-- Kennzahlen je Datenteil.
-
-Das Bundle enthält außerdem Achsen, Merkmals-/Kanalnamen, Quellenhashes und
-Dateinamen samt SHA-256 des zugehörigen Modells. Tensorformen, Maschinenzahlen,
-Skalierung und endliche Werte werden geprüft; die Modelldatei darf sich während
-der Auswertung nicht verändern. Die Datei wird atomar ersetzt. Die Kennfeldtensoren
-haben die Form (N, S, D, Q, 7). Die Geometrieeingaben bleiben normalisiert, obwohl
-value_scale="physical" die gespeicherten Kennfeldwerte bezeichnet.
-
-Einzelplots und PDF-Bericht
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-plot_prediction_results() liest evaluation.pt und erzeugt für jeden der sieben
-Kanäle einen PNG- und PDF-Vergleich mit Motor-CAD, insgesamt 14 Einzeldateien.
-Dargestellt werden sämtliche Kennfeldpunkte, getrennt nach Training, Validierung
-und Test, mit idealer Vergleichsgerade, Maschinen-/Punktzahlen, R² und MAE.
-Einheiten: Drehmoment Nm, Wirkungsgrad %, Luftspaltflussdichte T und Verluste W.
-
-create_prediction_report() erzeugt zusätzlich prediction_report.pdf: eine Seite
-im A4-Querformat mit sieben Diagrammen, Datensatzübersicht, mittlerem R² sowie
-MLP-Architektur und gespeicherten Trainingsparametern. Der Bericht prüft den
-SHA-256-Wert von surrogate.pt gegen evaluation.pt. Er benötigt genau sieben
-Ergebniskanäle und mindestens Training/Validierung; ein fehlender Testdatensatz
-wird als nicht vorhanden gekennzeichnet. Beide Ausgaben verwenden Arial und
-300 dpi für Rasterbestandteile. Vorhandene Ausgabedateien gleichen Namens werden
-beim erneuten Plotten überschrieben.
-
-Plots ohne neues Training erzeugen:
+Erneut plotten:
 
     python -m src.executable_files.main_plot_results
 
-Vorher MODEL_FOLDER in src/executable_files/main_plot_results.py einstellen.
-Aktuell ist 20261020_161109_f1353af2 eingetragen. Erwartet wird nur der Ordnername
-unter trained_nn, kein vollständiger Pfad. Dieser vorhandene Lauf enthält
-surrogate.pt, evaluation.pt, 14 Einzelplots und prediction_report.pdf.
-Es werden keine ursprünglichen CSV-Dateien für das erneute Plotten benötigt.
+Vorher MODEL_FOLDER auf kompatiblen Lauf einstellen, etwa Reference_model/LAUF.
+Auch absolute Ordner innerhalb PATH_DATA_TRAINED_NN sind erlaubt. evaluation.pt
+und Modell müssen zusammenliegen; CSVs sind nicht nötig. Plots werden überschrieben.
+Aktuell zeigt MODEL_FOLDER noch auf historischen Lauf 20261020_161109_f1353af2
+mit surrogate.pt. Formate gegen heutige Loader prüfen; alte Diagramme belegen
+keine heutige Ladekompatibilität.
 
-Unter data/optimization liegen bereits mehrere Studienordner. trained_nn enthält
-fünf Laufordner vom 18. bis 20.10.2026 und ältere Einzelartefakte data.pkl,
-trained_mlp.pt sowie trained_autoencoder.pt. Die alten Einzelartefakte sind keine
-neuen Bundles und werden vom aktuellen Plot-Einstieg nicht automatisch migriert.
-Historische Diagramme bleiben unter data/plots; neue Ausgaben liegen im Laufordner.
+Geometrievorhersage per API:
+
+    from pathlib import Path
+    from src.modules.neuronal_networks.model_data_io.model_io import (
+        load_bundle, predict_raw_geometry,
+    )
+    model, checkpoint = load_bundle(Path("PFAD/ZU/SurrogateModel.pt"))
+    # raw_geometry: (N,14), Reihenfolge aus checkpoint["feature_names"]
+    prediction = predict_raw_geometry(model, checkpoint, raw_geometry)
+
+Airgap/Stator_Bore in Originaleinheiten, zwölf Lambdas bereits berechnet übergeben,
+etwa mit lambdas_from_geometry(). Eingaben bleiben unverändert; Ausgabe sind
+physikalische Kennfelder. Keine eigene Vorhersage-CLI/CSV-Ausgabe.
+CNN-Sammlungen: load_autoencoders() und reconstruct() auf vorhandenen, anhand
+gespeicherter Zielskalierung normalisierten Kennfeldern.
 
 
-8. Logging, Prüfskripte und Tests
----------------------------------
+8. GUI, Logging und Abbruch
+----------------------------
 
-main_mcad_sim.py und main_optimize.py richten vor der Pipeline Anwendungslogging
-ein. Konsole und gemeinsame UTF-8-Datei erhalten Meldungen ab INFO:
+GUI im Hauptthread, Dienst in einem Thread, Worker in Prozessen. PipelineEvent
+transportiert Fortschritt über Queues. Pipelineinstanzen sind einmal startbar.
+Simulation zählt simulated/dropped/existing/copied und abgeschlossene Kombinationen.
+Voller Balken bedeutet bearbeitet. Optimierungsmaximum: 7*trials*effektive Workerzahl.
+Finale Trainings haben keinen eigenen Epochenbalken.
 
-    data/logs/<JJJJMMTT_HHMMSS_Mikrosekunden>_<achtstellige ID>_application.log
+Schließen während Arbeit fordert Abbruch an und versteckt GUI während Bereinigung.
+Simulation nutzt kill_workers(); Windows-Jobobjekte schützen Worker-Kindprozesse.
+Optimierung beendet/bereinigt Suchprozesse. PipelineCancelledError wird weitergereicht;
+regulärer Modell-/Auswertungsexport entfällt. Vorhandene CSV-Zeilen/Studien bleiben.
+Finales Kanaltraining kann Abbruch bis zu seinem Ende verzögern. Nach regulärem
+Ende Fenster schließen, damit Export folgt. Eigener Tempordner, Queues und Listener
+werden bereinigt; extern gestartetes eduVPN bleibt. Kein allgemeiner Motor-CAD-
+Rechnungstimeout.
 
-setup_main_logging() verwendet während der Pipeline dieselbe Datei mit einem
-QueueListener weiter. Motor-CAD- und Optuna-Worker senden ihre Logs an diese
-Queue. Optuna propagiert an das Python-Logging und deaktiviert seinen separaten
-Standardhandler. Haupt-/Testdateiauswahl, Early Stopping, Modell-/Auswertungspfade
-und die formatierten Kennzahlen landen ebenfalls im Log. Nach Pipelineende wird
-der vorherige Loggerzustand wiederhergestellt, sodass finales Training und Export
-in dieselbe Datei schreiben. Alte *_info.txt und *_error.txt sind Bestandsdateien.
+main_mcad_sim/main_optimize loggen ab INFO auf Konsole und je Aufruf in eine Datei:
 
-Die Pipeline schließt nach Dienstende GUI, Listener, dessen Handler und Queues.
-Dienstfehler und Abbruch werden danach an den Aufrufer weitergegeben. Jede
-Pipelineinstanz kann nur einmal laufen. Das finale Training und die Plotfunktionen
-werden nach der Suchpipeline ausgeführt und haben keine eigene Fortschritts-GUI.
+    data/logs/<Zeitstempel_mit_Mikrosekunden>_<ID>_application.log
 
-Geometrieprüfung:
+UTF-8; Worker/Hauptprozess verwenden während Pipeline QueueListener, davor/danach
+Anwendungshandler. Keine aktuellen getrennten *_info.txt-/ *_error.txt-Ausgaben.
+
+
+9. Prüfungen und Tests
+----------------------
 
     python -m src.executable_files.machine_test
 
-Das Skript prüft den v2-Generator für (B,L)=(1,3),(1,4),(1,5), insgesamt
-1.500 Betriebspunkte bei MAP_SIZE=(5,5,5). Generatorwerte werden mit DEFAULT_VALUES
-zusammengeführt und an test_boundary_conditions() übergeben. Motor-CAD wird nicht
-gestartet und es wird keine Ergebnis-CSV geschrieben. Der Paketimport der
-Motor-CAD-Prüfung benötigt dennoch ansys-motorcad-core. Das Skript besitzt einen
-__main__-Guard und startet seine Prüfung nicht beim Import.
-
-Automatisierte Regressionstests
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-pytest.ini setzt testpaths=tests und pythonpath=.; die Tests werden aus der
-Projektwurzel mit dem Projektinterpreter gestartet:
+Prüft v2 für (1,3),(1,4),(1,5), insgesamt 1500 Betriebspunkte ohne Motor-CAD-Start/
+Ergebnis-CSV; Randbedingungsimport braucht trotzdem ansys-motorcad-core.
 
     python -m pytest
-    python -m pytest -m "not training and not subprocess"
-    python -m pytest tests/test_cancellation.py tests/test_worker_job.py
 
-Die neun Testmodule behandeln Daten/Metriken, Dateien/Raster, Metadaten,
-Modelle/CPU-Training, Optuna, Logging, Simulationssteuerung, Abbruch und den
-Windows-Worker-Prozessbaum. Tests verwenden temporäre Dateien und synthetische
-Daten; Motor-CAD-Start und Tk-Fenster werden über Testgrenzen gesperrt oder ersetzt.
-Einzelne Tests starten echte Python-Unterprozesse bzw. kurzes CPU-Training.
-Der Windows-Jobobjekttest benötigt Windows und pywin32. Echte Motor-CAD-Rechnungen,
-Lizenzzugang, GUI-Darstellung und fachliche Modellgüte bleiben Integrationsaufgaben.
-Für die README-Aktualisierung wurde kein neuer Testlauf ausgeführt.
+Die aktuelle Matrix der zwölf Testmodule, gezielte Aufrufe, Isolation,
+Ruff-Befehle und Anforderungen an Prüfnachweise stehen in docs/TESTS_DE.md.
+Dort sind auch Markergrenzen dokumentiert: Der Windows-Jobtest startet
+Unterprozesse ohne subprocess-Marker; der parallele Journaltest trägt nur training.
+Der Ausdruck -m "not training and not subprocess" allein schließt daher nicht
+alle Unterprozesse aus.
 
-pytest und Ruff stehen aktuell in requirements.txt. pyproject.toml setzt für Ruff
-target-version="py314". Ergänzende Dokumente:
-
-    docs/WORKFLOW_DE.md
-    docs/DATEIEN_UND_SPEICHERORTE.md
-    docs/TESTS_DE.md
-    README_TESTS_UND_DOKUMENTATION.md
-
-Diese Dokumente beschreiben teilweise einen älteren Stand und verweisen unter
-anderem auf eine derzeit nicht vorhandene requirements-dev.txt. Für aktuelle
-Startoptionen und Ausgabedateien diese README und den Quellcode heranziehen.
-Der frühere Einzeltest check_logging.py ist entfernt; Loggingtests liegen in tests.
+Reale Motor-CAD-/Lizenz-/GUI-Läufe und fachliche Modellgüte bleiben
+Integrationsaufgaben. Achsentests und CSV-Fixtures nutzen noch die frühere
+Drehzahlformel ohne pi. Für diese Dokumentationsänderung wurde kein neuer
+Regressionstest-Erfolgsstatus erhoben; statische Prüfungen ersetzen keinen Testlauf.
 
 
-9. Fehlerbehebung und aktuelle Grenzen
---------------------------------------
+10. Aktuelle Grenzen und Codevorschläge (Code unverändert)
+----------------------------------------------------------
 
-Offene Anpassungen der Konfigurationsumstellung vom 26.10.2026
-    _get_lambda_values_v2() verwendet LAMBDA_MIN_MAX als Array der Form (9, 2),
-    setzt die Samplingdimension aber noch auf shape[1], also 2 statt 9. Die neun
-    Grenzen passen deshalb nicht zu den erzeugten zweidimensionalen Samples.
-    _normalize_geo_tensor() entpackt jeden Eintrag in GEO_PARAMETERS_MIN_MAX_DICT
-    als (Minimum, Maximum); die festen Ganzzahlen 18 und 12 führen dabei zu einem
-    TypeError. _align_speed_grid() ist implementiert, fehlt aber im load()-Ablauf;
-    CSV-Rundungen können dadurch vollständige Kennfelder als rasterfremd verwerfen.
-    Außerdem verwendet map_generator() MAP_SIZE als (Drehzahl, q, d), der
-    DataLoader als (Drehzahl, d, q). Bei (5,5,5) haben beide dasselbe Raster;
-    bei unterschiedlichen d-/q-Achsengrößen passen die Raster nicht zusammen.
-    Diese Punkte wurden statisch festgestellt und bei der README-Aktualisierung
-    nicht im Quellcode geändert oder durch Ausführung geprüft.
+Drehzahl-Rundungsabgleich
+    Generator/_recalculate_data verwenden ShaftSpeed/(D*pi), _align_speed_grid
+    Intervalle aus ShaftSpeed/D. Rundung wird nicht konsistent abgeglichen;
+    passende Kennfelder können verworfen werden. pi auch in Intervallgrenzen
+    verwenden und Tests/CSV-Fixtures an dieselbe Definition anpassen.
 
-Fehlendes Argument --csv / FileNotFoundError
-    Einen .csv-Dateinamen direkt unter Training_data angeben. Hauptquelle und
-    automatisch geloggte Testauswahl prüfen. Das Skript durchsucht keine
-    Trainingsunterordner; --test-csv ist keine aktuelle CLI-Option mehr.
+Altes Trainingsschema
+    Zwei CSVs haben 29 statt 39 Spalten. Neue Daten oder belegte Migration vorsehen.
+    Auch jede automatische Testquelle muss passen. Fehlende Spalten, leere
+    Quellen und fehlende gültige Kennfelder brechen ab.
 
-Fehlende CSV-Spalten / No complete reference-grid maps
-    Auch jede automatisch gewählte Testquelle prüfen. Leere Dateien oder
-    Dateien ohne vollständige Referenzkennfelder werden nicht übersprungen.
-    MAP_SIZE, Achsen und Schema müssen passen. Frühere CSVs mit absolutem
-    Drehzahlraster und alten Stromdichtebereichen erfüllen das neue Referenzraster
-    nicht automatisch. Die Stromdichtezuordnung korrigiert nur eindeutig durch
-    CSV-Rundung erklärbare Abweichungen; der Drehzahlabgleich wird noch nicht
-    aufgerufen.
+Generatorstandard
+    Pipeline standardmäßig v1, Generator nur v2. Standard, Typangaben und
+    Validierung vereinheitlichen, damit ungültige Modi früh scheitern.
 
-Overlapping machines / Duplicate machines between external test sources
-    Den Trainingsordner auf unabhängige CSV-Quellen beschränken. Umbenennen
-    oder Kopieren einer Datei beseitigt gleiche Geometrie-IDs nicht.
+Experimentherkunft
+    In der Optimierungs-Hashliste fehlen unter anderem lambda_geometry.py,
+    feature_schema.py, surrogate_model.py und finaler Trainingsservice.
+    Abgeleitete Werte decken manche, nicht jede Verhaltensänderung ab.
+    Fachlich relevante Implementierung vollständig versionieren oder hashen.
 
-Zu wenige vollständige Maschinen
-    Die Hauptquelle benötigt mindestens fünf gültige Kennfelder nach Bereinigung.
-    Doppelte, fehlende oder zusätzliche Betriebspunkte entfernen ganze Maschinen.
+Alte Modelle/Plotvoreinstellung
+    Kompatiblen Lauf auswählen oder Migration prüfen. Umbenennen allein macht
+    alte Bundles nicht mit aktuellen Features und Formaten kompatibel.
 
-ModuleNotFoundError / DLL- oder BLAS-Importfehler
-    Projektwurzel und Interpreter Env_NN_AFM prüfen. Die Conda-Datei legt
-    OpenBLAS/nomkl fest; die Python-Pakete mit derselben Umgebung installieren.
-    Für den Windows-Worker-Schutz wird pywin32 benötigt.
+Abbruch im finalen Training
+    Für schnelle Reaktion CancellationToken in der Epochenschleife prüfen.
+    Suchworkerzeitlimit begrenzt diesen Schritt nicht.
 
-Motor-CAD oder Basismodell fehlt / Rechnung scheitert
-    Externe Pfade, Lizenzzugang und Basisdatei prüfen. eduVPN-Prozessstart ist
-    kein Nachweis einer funktionierenden Lizenzverbindung. Details stehen im Log.
+Testmarker
+    Windows-Jobtest und parallelen Journaltest passend mit subprocess markieren.
+    Bis dahin die explizite Auswahl in docs/TESTS_DE.md verwenden.
 
-Unpassende Metadaten
-    Cache-Quellen benötigen Metadatenversion 2 mit gleichem Setup und Fingerprint.
-    Alte Version-1-Sidecars können nur bei gleicher Setup-Konfiguration über
-    migrate_simulation_metadata() geprüft und migriert werden. Quellcode-Hashes
-    sind kein Bestandteil des neuen Simulationsfingerprints; die alte Liste
-    gerichteter Fingerprintfreigaben wird nicht mehr verwendet.
+Diese Codevorschläge sind weiterhin offen und statisch festgestellt. Die
+Dokumentationsaktualisierung behebt keine der genannten Implementierungsgrenzen.
 
-Imported legacy files can only be used as a cache source
-    CSV-Dateien mit adoption-Vermerk nicht als Ausgabeziel fortschreiben.
-    Eine neue Zieldatei wählen. Der gespeicherte CSV-Hash muss unverändert passen.
 
-Altdatei-Metadaten neu schreiben
-    CSV_PATH, MOT_SHA256 und REASON in main_adopt_legacy_csv.py prüfen. Der
-    Einstieg schreibt direkt und kann vorhandene Sidecars ersetzen. Die API
-    adopt_legacy_csv() prüft dagegen standardmäßig ohne Schreiben und lehnt
-    vorhandene Sidecars ab. Beide erfassen eine historische Setup-Annahme.
+11. Dokumentation: Zuständigkeiten und verbleibende Aufgaben
+-----------------------------------------------------------
 
-Fenster während der Arbeit geschlossen
-    Das fordert einen Abbruch an und blendet das Fenster während der Bereinigung
-    aus. PipelineCancelledError wird weitergereicht; der Suchabbruch erzeugt kein
-    finales Modell. Bereits geschriebene Simulationszeilen und Studien bleiben
-    bestehen. Nach regulärem Suchabschluss dagegen das Fenster schließen, um
-    finales Training und Export fortzusetzen.
+Die Aktualisierung der drei docs-Dateien ist umgesetzt. Veraltete Aussagen zu
+v1, CSV-Erstellungszeitpunkt, Metadatenfreigaben, Testauswahl, Features/Achsen,
+SQLite, Kanalarchitekturen, finalem Training und Exporten wurden korrigiert.
+Die Zuständigkeiten sind:
 
-Worker-Zeitbudget überschritten
-    --worker-timeout gilt für die Suchworker insgesamt. Laufende Prozesse werden
-    beendet und bereinigt. Nicht abgeschlossene Trials können in der SQLite-
-    Studie verbleiben. Bei gleichem Experiment werden weitere Trials ergänzt;
-    eine Wiederaufnahme einzelner abgebrochener Trials ist nicht implementiert.
+    README.txt                         Einstieg, Installation, CLI und Grenzen
+    docs/WORKFLOW_DE.md                 Vertiefter fachlicher Ablauf,
+                                       CNN-/Kombimodus, Datenmigration und Anwendung
+    docs/DATEIEN_UND_SPEICHERORTE.md     Artefakte, Formate, Herkunft und Aufbewahrung
+    docs/TESTS_DE.md                    Zwölf Testmodule, Marker, Isolation,
+                                       Integrationsaufgaben und Prüfnachweise
 
-FloatingPointError im Training
-    Daten, Normalisierung, Lernrate und Modellvorhersagen prüfen. Nicht endliche
-    Verluste oder Gradienten führen zum Abbruch vor dem nächsten Optimiererschritt.
+Installation und aktuelle CLI-Vorgaben bleiben zentral in der README.
+Der Workflow verweist darauf; die Testmatrix wird zentral in TESTS_DE.md gepflegt.
+Die Artefaktreferenz unterscheidet persistierte Auswertungsdaten vom vollständigen
+Trainingszustand. Der Workflow enthält Anforderungen an eine belegte Migration;
+ein automatisches Daten-/Modellmigrationswerkzeug existiert weiterhin nicht.
 
-Modellbundle oder Bericht wird abgelehnt
-    Merkmal-/Kanal-/Achsenfolge, Skalierung und Dimensionen müssen passen.
-    prediction_report.pdf benötigt die zur evaluation.pt gehörende surrogate.pt
-    mit identischem SHA-256 sowie genau sieben Ausgabekanäle.
+Offen bleiben ausgeführte Integrations- und Güteprüfungen sowie die in Abschnitt 10
+genannten Codeänderungen. TESTS_DE.md enthält ein Schema für datierte Prüfnachweise;
+ein aktueller erfolgreicher Testlauf wird nicht behauptet. Eine separate
+PRUEFPROTOKOLL.md ist derzeit nicht vorhanden und wird nicht vorausgesetzt.
 
-Arial oder evaluation.pt fehlt / keine neuen Diagramme
-    Nach Suchende zunächst finales Training und Export abwarten. evaluation.pt
-    muss neben surrogate.pt liegen. Arial muss installiert sein; ein Fontfallback
-    ist deaktiviert. Scheitert die Plotphase, können Modell und Auswertungsdatei
-    bereits vorhanden sein. Nach Korrektur main_plot_results.py für diesen Lauf
-    starten; neues Training ist dafür nicht erforderlich.
+Die frühere Einbauanleitung README_TESTS_UND_DOKUMENTATION.md ist im Arbeitsbaum
+nicht mehr vorhanden. Der frühere Archivierungs-/Entfernungsvorschlag ist erledigt.
+
+
+12. TXT-Dateien und Aufbewahrung
+--------------------------------
+
+Aktuell sind README.txt und requirements.txt vorhanden und weiterhin notwendig:
+diese Projektanleitung sowie die von environment.yml eingebundene Paketliste.
+
+formatpruefung.txt, konventionspruefung.txt und restpruefung.txt sind im Arbeitsbaum
+nicht mehr vorhanden. Die Entfernungsvorschläge sind damit erledigt; diese
+Dateien wurden nicht erneut angelegt. Künftige Prüfausgaben nur nach tatsächlichem
+Lauf mit Datum, Befehl, Code-/Umgebungsstand und Ergebnis sichern.
+
+CSV samt Sidecar, Trainingsquellen, Modelle, evaluation.pt, Studien, Logs, Code-
+und Umgebungsstand aufbewahren. Bundles ersetzen vollständige CSV-Quellen/Umgebung
+nicht. Alte Modelle, SQLite/Journals und Backups sind nicht allein wegen Alters
+überflüssig. Nach Herkunft und Wiederherstellbarkeit entscheiden; aktive Studien/
+Prozessdateien nicht ändern. Details stehen in docs/DATEIEN_UND_SPEICHERORTE.md.

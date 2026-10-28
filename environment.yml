@@ -1,0 +1,31 @@
+# Ansys Motor-CAD and eduVPN are external Windows applications and are not
+# installed by this environment.
+# Run from the project root: conda env create -f environment.yml
+# Python and package versions match Env_NN_AFM as inspected on 2026-10-12.
+# requirements.txt contains the shared Python package requirements. Conda
+# installs the scientific and HTTP packages first, with matching version pins.
+# PyTorch, PyMotorCAD, Optuna, seaborn and Windows Python tzdata are added by pip.
+name: Env_NN_AFM
+
+channels:
+  - defaults
+
+dependencies:
+  - python=3.14.4
+  - pip
+  - numpy==2.5.3
+  - scipy==1.18.1
+  - pandas=3.0.2
+  - matplotlib=3.10.9
+  - plotly=6.7.0
+  - tk=8.6
+  - tzdata
+  # Install the complete HTTP stack with Conda before PyMotorCAD is added by
+  # pip. This avoids partially overwritten requests dependencies.
+  - requests=2.34.2
+  - "idna>=3,<4"
+  - charset-normalizer=3.4.7
+  - pip:
+      - -r requirements.txt
+  - nomkl
+  - "blas=*=openblas"
