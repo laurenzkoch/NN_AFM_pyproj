@@ -11,7 +11,11 @@ from typing import Literal, NotRequired, TypedDict, cast
 import numpy as np
 import pandas as pd
 
-from src.config.config_mcad_parameters import CSV_PARAMETERS
+from src.config.config_mcad_parameters import (
+    CSV_DECIMAL_PLACES,
+    CSV_PARAMETERS,
+    REFERENCE_SPEED_RPM,
+)
 from src.config.config_paths import (
     MCAD_DEPENDENCY_FILES,
     MCAD_DEPENDENCY_REVISION,
@@ -31,6 +35,10 @@ class SimulationPayload(TypedDict):
     external_dependency_hashes: dict[str, str]
     csv_columns: list[str]
     float_decimal_places: int
+    speed_normalization: str
+    reference_speed_rpm: float
+    reference_current_a: float
+    back_emf_constant_definition: str
 
 
 class LegacyAdoption(TypedDict):
@@ -50,25 +58,15 @@ class SimulationMetadata(TypedDict):
 def _copy_simulation_payload(
     payload: SimulationPayload,
 ) -> SimulationPayload:
-    return {
-        "metadata_version": payload["metadata_version"],
-        "base_model_sha256": payload["base_model_sha256"],
-        "mcad_executable_sha256": payload["mcad_executable_sha256"],
-        "integration_version": payload["integration_version"],
-        "external_dependency_revision": payload["external_dependency_revision"],
-        "external_dependency_hashes": dict(payload["external_dependency_hashes"]),
-        "csv_columns": list(payload["csv_columns"]),
-        "float_decimal_places": payload["float_decimal_places"],
-    }
-
+    return deepcopy(payload)
 
 def is_compatible_metadata(
     actual: SimulationMetadata,
     expected: SimulationMetadata,
 ) -> bool:
     if (
-        actual["payload"].get("metadata_version") != 2
-        or expected["payload"].get("metadata_version") != 2
+        actual["payload"].get("metadata_version") != 3
+        or expected["payload"].get("metadata_version") != 3
     ):
         return False
 
@@ -87,7 +85,7 @@ def metadata_path(csv_path: str | Path) -> Path:
 
 def build_simulation_metadata() -> SimulationMetadata:
     payload: SimulationPayload = {
-        "metadata_version": 2,
+        "metadata_version": 3,
         "base_model_sha256": file_sha256(PATH_MCAD_BASEFILE),
         "mcad_executable_sha256": file_sha256(PATH_MCAD_EXE),
         "integration_version": version("ansys-motorcad-core"),
@@ -97,7 +95,13 @@ def build_simulation_metadata() -> SimulationMetadata:
             for path in MCAD_DEPENDENCY_FILES
         },
         "csv_columns": list(CSV_PARAMETERS),
-        "float_decimal_places": 4,
+        "float_decimal_places": CSV_DECIMAL_PLACES,
+        "speed_normalization": "shaft_speed_rpm / base_speed_rpm",
+        "reference_speed_rpm": REFERENCE_SPEED_RPM,
+        "reference_current_a": 0.0,
+        "back_emf_constant_definition": (
+            "fundamental line-line peak / mechanical angular speed; V*s/rad"
+        ),
     }
 
     return {
@@ -295,7 +299,7 @@ def migrate_simulation_metadata(
         not is_compatible_metadata(expected, expected)
         or "implementation_hashes" in expected["payload"]
     ):
-        raise ValueError("Expected metadata must use the new version 2 format.")
+        raise ValueError("Expected metadata must use the new version 3 format.")
 
     sidecar: Path = metadata_path(csv_path)
     original_sidecar: bytes = sidecar.read_bytes()
@@ -310,7 +314,7 @@ def migrate_simulation_metadata(
 
     previous_version: object = actual["payload"].get("metadata_version")
 
-    if type(previous_version) is not int or previous_version not in (1, 2):
+    if type(previous_version) is not int or previous_version not in (1, 2, 3):
         raise ValueError("Unsupported metadata version.")
 
     previous_setup: dict[str, object] = {

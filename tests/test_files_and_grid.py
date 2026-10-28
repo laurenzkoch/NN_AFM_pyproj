@@ -45,12 +45,45 @@ def test_failed_copy_removes_only_its_directory(
 
 def test_grid_has_correct_axis_order_for_unequal_sizes() -> None:
     grid = map_generator(
-        i_min_max=(100, 200), j_min_max=(1, 4), k_min_max=(-3, 0), map_size=(2, 3, 4)
+        i_min_max=(0.2, 0.8),
+        j_min_max=(1.0, 4.0),
+        k_min_max=(-3.0, 0.0),
+        map_size=(2, 3, 4),
     )
+
     assert grid.shape == (24, 3)
+    assert grid.dtype == np.float64
+
     assert len(np.unique(grid[:, 0])) == 2
-    assert len(np.unique(grid[:, 1])) == 3  # Spalte q
-    assert len(np.unique(grid[:, 2])) == 4  # Spalte d
+    assert len(np.unique(grid[:, 1])) == 3
+    assert len(np.unique(grid[:, 2])) == 4
+
+    np.testing.assert_allclose(
+        grid[:5],
+        [
+            [0.2, 1.0, -3.0],
+            [0.2, 1.0, -2.0],
+            [0.2, 1.0, -1.0],
+            [0.2, 1.0, 0.0],
+            [0.2, 2.5, -3.0],
+        ],
+        rtol=0.0,
+        atol=1e-12,
+    )
+
+    np.testing.assert_allclose(
+        grid[12],
+        [0.8, 1.0, -3.0],
+        rtol=0.0,
+        atol=1e-12,
+    )
+
+    np.testing.assert_allclose(
+        grid[-1],
+        [0.8, 4.0, 0.0],
+        rtol=0.0,
+        atol=1e-12,
+    )
 
 
 @pytest.mark.parametrize("sizes", [(0, 3, 4), (True, 3, 4), (2, -1, 4)])
@@ -66,3 +99,60 @@ def test_worker_count_is_limited_to_available_cpus(
     assert resources.determine_number_of_kernels(4) == 2
     with pytest.raises(TypeError):
         resources.determine_number_of_kernels(True)
+
+@pytest.mark.parametrize(
+    "bounds",
+    [
+        (-0.1, 1.0),
+        (1.0, 0.5),
+        (0.5, 0.5),
+        (float("nan"), 1.0),
+        (0.5, float("inf")),
+    ],
+)
+def test_grid_rejects_invalid_speed_bounds(
+    bounds: tuple[float, float],
+) -> None:
+    with pytest.raises(ValueError):
+        map_generator(
+            i_min_max=bounds,
+            map_size=(2, 2, 2),
+        )
+
+
+@pytest.mark.parametrize(
+    "bounds",
+    [
+        (4.0, 1.0),
+        (float("nan"), 4.0),
+        (1.0, float("inf")),
+    ],
+)
+def test_grid_rejects_invalid_current_density_bounds(
+    bounds: tuple[float, float],
+) -> None:
+    with pytest.raises(ValueError):
+        map_generator(
+            j_min_max=bounds,
+            map_size=(2, 2, 2),
+        )
+
+    with pytest.raises(ValueError):
+        map_generator(
+            k_min_max=bounds,
+            map_size=(2, 2, 2),
+        )
+
+
+def test_grid_allows_fixed_single_point_axes() -> None:
+    grid = map_generator(
+        i_min_max=(0.5, 0.5),
+        j_min_max=(3.0, 3.0),
+        k_min_max=(-4.0, -4.0),
+        map_size=(1, 1, 1),
+    )
+
+    np.testing.assert_array_equal(
+        grid,
+        [[0.5, 3.0, -4.0]],
+    )

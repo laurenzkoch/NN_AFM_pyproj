@@ -1,4 +1,3 @@
-import math
 from collections.abc import Generator
 from typing import Literal, Protocol, cast
 
@@ -17,7 +16,6 @@ from src.modules.geometry.lambda_geometry import (
     LambdaValues,
     geometry_from_lambdas,
 )
-from src.modules.simulation.generators.map_generator import map_generator
 
 
 class _LegacyLatinHypercubeFactory(Protocol):
@@ -32,14 +30,19 @@ class _LegacyLatinHypercubeFactory(Protocol):
 
 class AFMMachineGenerator:
     def __init__(
-        self,
-        num_base_designs: int,
-        num_lam_designs: int,
-        num_data_points: int,
+            self,
+            num_base_designs: int,
+            num_lam_designs: int,
     ) -> None:
+        for name, value in (
+                ("num_base_designs", num_base_designs),
+                ("num_lam_designs", num_lam_designs),
+        ):
+            if type(value) is not int or value < 1:
+                raise ValueError(f"{name} must be a positive integer.")
+
         self.num_base_designs = num_base_designs
         self.num_lam_designs = num_lam_designs
-        self.num_datapoints = num_data_points
 
     def get_generator(self, _type: str) -> Generator[dict[str, float]]:
         match _type:
@@ -111,9 +114,8 @@ class AFMMachineGenerator:
 
         return tuple(LambdaValues.from_array(sample) for sample in samples)
 
-    def _get_samples(self) -> tuple[np.ndarray, np.ndarray]:
-
-        airgap_dsi_samples: np.ndarray = self._sampling(
+    def _get_base_samples(self) -> NDArray[np.float64]:
+        return self._sampling(
             num_of_points=self.num_base_designs,
             d=2,
             lower_bounds=np.array([AIRGAP[0], STATOR_BORE[0]]),
@@ -121,61 +123,16 @@ class AFMMachineGenerator:
             seed=17,
         )
 
-        op_samples: np.ndarray = map_generator()
-
-        return airgap_dsi_samples, op_samples
-
-    @staticmethod
-    def _calculate_geometric(
-        airgap_sample: float,
-        stator_bore_sample: float,
-        lambdas: LambdaValues,
-        shaft_speed_norm: float,
-        q_current_density: float,
-        d_current_density: float,
-    ) -> dict[str, float]:
-
-
-        geometry: dict[str, float] = geometry_from_lambdas(
-            lambdas,
-            airgap=airgap_sample,
-            stator_bore=stator_bore_sample,
-            slot_number=SLOT_NUMBER,
-            pole_number=POLE_NUMBER,
-        )
-
-        geometry.update(
-            {
-                "RMSCurrentDensity": math.hypot(
-                    q_current_density,
-                    d_current_density,
-                ),
-                # shaft_speed_norm = shaft_speed / (d_sa*pi)
-                "ShaftSpeed": (shaft_speed_norm * geometry["Stator_Lam_Dia"] * math.pi),
-                "PhaseAdvance": math.degrees(
-                    math.atan2(-d_current_density, q_current_density)
-                ),
-            }
-        )
-
-        return geometry
-
     def _lambda_generator_v2(self) -> Generator[dict[str, float]]:
-        lambdas = self._get_lambda_values_v2()
-        airgap_dsi_samples, op_samples = self._get_samples()
+        lambda_sets = self._get_lambda_values_v2()
+        base_samples = self._get_base_samples()
 
-        for airgap_sample, stator_bore_sample in airgap_dsi_samples:
-            for lambda_set in lambdas:
-                for (
-                    shaft_speed_norm,
-                    q_current_density,
-                    d_current_density,
-                ) in op_samples:
-                    yield self._calculate_geometric(
-                        airgap_sample,
-                        stator_bore_sample,
-                        lambda_set,
-                        shaft_speed_norm,
-                        q_current_density,
-                        d_current_density,
-                    )
+        for airgap_sample, stator_bore_sample in base_samples:
+            for lambda_set in lambda_sets:
+                yield geometry_from_lambdas(
+                    lambda_set,
+                    airgap=float(airgap_sample),
+                    stator_bore=float(stator_bore_sample),
+                    slot_number=SLOT_NUMBER,
+                    pole_number=POLE_NUMBER,
+                )

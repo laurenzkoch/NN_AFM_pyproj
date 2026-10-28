@@ -2,11 +2,16 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 import pytest
 
-from src.config.config_mcad_parameters import CSV_PARAMETERS
+from src.config.config_mcad_parameters import (
+    CSV_DECIMAL_PLACES,
+    CSV_PARAMETERS,
+    REFERENCE_SPEED_RPM,
+)
 from src.modules.data_managment import simulation_metadata as module
 from src.modules.data_managment.experiment_utils import canonical_hash, file_sha256
 from src.modules.data_managment.simulation_metadata import SimulationMetadata
@@ -131,7 +136,7 @@ def test_corrupt_fingerprint_and_orphan_sidecar_rejected(
         module.prepare_result_csv(path, metadata)
 
 
-def test_version_2_requires_matching_setup_and_valid_fingerprints(
+def test_version_3_requires_matching_setup_and_valid_fingerprints(
     metadata: SimulationMetadata,
 ) -> None:
     assert module.is_compatible_metadata(metadata, metadata)
@@ -189,10 +194,61 @@ def test_metadata_builder_does_not_hash_python_files(
 
     result: SimulationMetadata = module.build_simulation_metadata()
 
-    assert result["payload"]["metadata_version"] == 2
+    assert result["payload"]["metadata_version"] == 3
+    assert result["payload"]["float_decimal_places"] == CSV_DECIMAL_PLACES
+    assert result["payload"]["reference_speed_rpm"] == REFERENCE_SPEED_RPM
+    assert result["payload"]["reference_current_a"] == 0.0
+
+    assert result["payload"]["speed_normalization"] == (
+        "shaft_speed_rpm / base_speed_rpm"
+    )
+
+    assert result["payload"]["back_emf_constant_definition"] == (
+        "fundamental line-line peak / mechanical angular speed; V*s/rad"
+    )
     assert "implementation_hashes" not in result["payload"]
     assert hashed_paths == [
         Path(module.PATH_MCAD_BASEFILE),
         Path(module.PATH_MCAD_EXE),
     ]
     assert result["fingerprint"] == canonical_hash(result["payload"])
+
+
+@pytest.mark.parametrize("previous_version", [1, 2])
+def test_old_metadata_versions_are_incompatible(
+    metadata: SimulationMetadata,
+    previous_version: int,
+) -> None:
+    previous: SimulationMetadata = deepcopy(metadata)
+    previous["payload"]["metadata_version"] = previous_version
+    previous["fingerprint"] = canonical_hash(previous["payload"])
+
+    assert not module.is_compatible_metadata(previous, metadata)
+    assert not module.is_compatible_metadata(metadata, previous)
+
+
+@pytest.mark.parametrize(
+    ("field", "changed_value"),
+    [
+        ("reference_speed_rpm", 2000.0),
+        ("reference_current_a", 1.0),
+        ("speed_normalization", "different normalization"),
+        ("back_emf_constant_definition", "different definition"),
+        ("float_decimal_places", 4),
+    ],
+)
+def test_changed_reference_setup_is_incompatible(
+    metadata: SimulationMetadata,
+    field: str,
+    changed_value: object,
+) -> None:
+    changed: SimulationMetadata = deepcopy(metadata)
+
+    # Dynamic field names are intentional in this parametrized test.
+    payload: dict[str, object] = dict(changed["payload"])
+    payload[field] = changed_value
+
+    changed["payload"] = cast(module.SimulationPayload, payload)
+    changed["fingerprint"] = canonical_hash(changed["payload"])
+
+    assert not module.is_compatible_metadata(changed, metadata)

@@ -9,8 +9,13 @@ from typing import Self
 
 import ansys.motorcad.core as pymotorcad
 
-from src.config.config_mcad_parameters import CSV_PARAMETERS, DEFAULT_VALUES
+from src.config.config_mcad_parameters import (
+    DEFAULT_VALUES,
+    MCAD_RESULT_PARAMETERS,
+    REFERENCE_SPEED_RPM,
+)
 from src.config.config_paths import PATH_MCAD_BASEFILE, PATH_MCAD_EXE
+from src.modules.simulation.reference_run import ReferenceRunResult
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +176,7 @@ class MCADProcessor:
 
     def start(self) -> None:
         self.mcad_process.set_variable("MessageDisplayState", 2)
-        self.mcad_process.set_visible(True)
+        self.mcad_process.set_visible(False)
 
     def close(self) -> None:
         try:
@@ -231,11 +236,7 @@ class MCADProcessor:
 
         if test_boundary_conditions(all_parameters, all_values):
             if self.do_calculation():
-                value_row = get_values(CSV_PARAMETERS)
-
-                # print("___________Calculation ran sucessfully___________")
-                # _print_design(all_parameters, all_values)
-                # _print_design(OUTPUT_NEURON_LIST, output_values)
+                value_row = get_values(MCAD_RESULT_PARAMETERS)
                 return value_row, True
 
             else:
@@ -250,3 +251,64 @@ class MCADProcessor:
                 _design_to_string(all_parameters, all_values),
             )
             return None, False
+
+    def execute_reference_run(self) -> ReferenceRunResult | None:
+        """Run an open-circuit reference calculation for the current geometry.
+
+        The constant variable must represent the fundamental line-to-line
+        back-EMF peak divided by mechanical angular speed, in V*s/rad.
+
+        Return None for rejected geometry or a failed magnetic calculation.
+        Other errors propagate to the worker, which closes the MCAD instance.
+        """
+
+
+        temporary_values: dict[str, float | bool] = {
+            "ShaftSpeed": REFERENCE_SPEED_RPM,
+            "PeakCurrent": 0.0,
+            "RMSCurrentDensity": 0.0,
+            "PhaseAdvance": 0.0,
+            "OpenCircuitCalculation": True,
+            "BackEMFCalculation": True,
+        }
+
+        previous_values = {
+            name: self.mcad_process.get_variable(name)
+            for name in temporary_values
+        }
+
+        for name, value in temporary_values.items():
+            self.mcad_process.set_variable(name, value)
+
+        parameter_names = list(DEFAULT_VALUES)
+        parameter_values = [
+            self.get_value_from_mcad(name)
+            for name in parameter_names
+        ]
+
+        result: ReferenceRunResult | None = None
+
+        geometry_is_valid = test_boundary_conditions(
+            parameter_names,
+            parameter_values,
+        )
+
+        if not geometry_is_valid:
+            logger.warning("Reference run rejected by boundary checks.")
+        elif not self.do_calculation():
+            logger.warning("Reference magnetic calculation failed.")
+        else:
+            result = ReferenceRunResult(
+                reference_speed_rpm=self.get_value_from_mcad("ShaftSpeed"),
+                back_emf_constant_ll_peak_vs_per_rad=(
+                    self.get_value_from_mcad("Ke_Fundamental")
+                ),
+                peak_back_emf_phase_v=(
+                    self.get_value_from_mcad("PeakBackEMFPhase")
+                ),
+            )
+
+        for name, value in previous_values.items():
+            self.mcad_process.set_variable(name, value)
+
+        return result

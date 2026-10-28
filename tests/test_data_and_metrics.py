@@ -86,7 +86,18 @@ def test_loader_rejects_overlapping_external_test_machines(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize(
-    "column", ["RMSCurrentDensity", "PeakCurrent", "Magnet_Length", "Slot_Depth"]
+    "column",
+    [
+        "RMSCurrentDensity",
+        "PeakCurrent",
+        "Magnet_Length",
+        "Slot_Depth",
+        "DCBusVoltage",
+        "ReferenceSpeedRPM",
+        "ReferenceKeFundamental",
+        "ReferencePeakBackEMFPhase",
+        "BaseSpeedRPM",
+    ],
 )
 def test_zero_denominators_are_rejected(column: str) -> None:
     frame = make_frame(1)

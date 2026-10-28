@@ -14,6 +14,7 @@ from torch import Tensor
 
 from src.config.config_mcad_parameters import (
     AXIS_LIST,
+    CSV_DECIMAL_PLACES,
     CSV_PARAMETERS,
     D_CURRENT_DENSITY,
     GEO_PARAMETERS,
@@ -290,7 +291,49 @@ class DataLoader:
                 np.sqrt(2) * df["RMSCurrentDensity"]
         )
 
-        df[AXIS_LIST[0]] = df["ShaftSpeed"] / (df["Stator_Lam_Dia"] * math.pi)
+        positive_reference_columns = (
+            "DCBusVoltage",
+            "ReferenceSpeedRPM",
+            "ReferenceKeFundamental",
+            "ReferencePeakBackEMFPhase",
+            "BaseSpeedRPM",
+        )
+
+        for column in positive_reference_columns:
+            if bool((df[column] <= 0).any()):
+                raise ValueError(f"'{column}' must be strictly positive.")
+
+        if bool((df["ShaftSpeed"] < 0).any()):
+            raise ValueError("'ShaftSpeed' must not be negative.")
+
+        expected_base_speed = (
+                df["DCBusVoltage"]
+                / df["ReferenceKeFundamental"]
+                * 60.0
+                / math.tau
+        )
+
+        if not np.allclose(
+                df["BaseSpeedRPM"],
+                expected_base_speed,
+                rtol=1e-8,
+                atol=1e-8,
+        ):
+            raise ValueError(
+                "BaseSpeedRPM is inconsistent with voltage and reference Ke."
+            )
+
+        df[AXIS_LIST[0]] = df["ShaftSpeed"] / df["BaseSpeedRPM"]
+
+        if not np.allclose(
+                df[AXIS_LIST[0]],
+                df["ShaftSpeedNorm"],
+                rtol=1e-8,
+                atol=1e-9,
+        ):
+            raise ValueError(
+                "Stored normalized speed disagrees with reconstructed speed."
+            )
         df[AXIS_LIST[1]] = df["RMSPhaseCurrent_Q"] / conductor_area
         df[AXIS_LIST[2]] = df["RMSPhaseCurrent_D"] / conductor_area
 
@@ -333,26 +376,31 @@ class DataLoader:
         df[axis_name] = aligned
 
     def _align_speed_grid(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calculate normalized-speed bounds from four-decimal rounding."""
-        half_resolution: float = 0.00005
-        offsets: NDArray[np.float64] = np.array(
+        """Recover speed-grid coordinates within CSV rounding bounds."""
+        if df.empty:
+            return df
+
+        half_resolution = 0.5 * 10.0 ** (-CSV_DECIMAL_PLACES)
+        offsets = np.array(
             [-half_resolution, half_resolution],
             dtype=np.float64,
         )
 
         speed = df["ShaftSpeed"].to_numpy(dtype=np.float64)
-        diameter = df["Stator_Lam_Dia"].to_numpy(dtype=np.float64)
+        base_speed = df["BaseSpeedRPM"].to_numpy(dtype=np.float64)
 
-        if bool((diameter <= half_resolution).any()):
-            raise ValueError("Diameter is too small for speed-grid alignment.")
-
-        if df.empty:
-            return df
+        if bool((base_speed <= half_resolution).any()):
+            raise ValueError(
+                "Base speed is too small for speed-grid alignment."
+            )
 
         speed_bounds = speed[:, None] + offsets
-        diameter_bounds = diameter[:, None] + offsets
+        base_speed_bounds = base_speed[:, None] + offsets
 
-        possible_values = speed_bounds[:, :, None] / diameter_bounds[:, None, :]
+        possible_values = (
+                speed_bounds[:, :, None]
+                / base_speed_bounds[:, None, :]
+        )
 
         self._align_axis_grid(
             df=df,
@@ -360,11 +408,12 @@ class DataLoader:
             possible_values=possible_values,
             positions=np.arange(len(df), dtype=np.intp),
         )
+
         return df
 
     def _align_current_density_grid(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calculate current-density bounds from four-decimal rounding."""
-        half_resolution: float = 0.00005
+        """Recover current-density coordinates within CSV rounding bounds."""
+        half_resolution = 0.5 * 10.0 ** (-CSV_DECIMAL_PLACES)
         offsets: NDArray[np.float64] = np.array(
             [-half_resolution, half_resolution],
             dtype=np.float64,

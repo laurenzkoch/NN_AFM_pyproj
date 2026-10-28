@@ -1,0 +1,16 @@
+$files = @(
+    "src",
+    "tests",
+    "pyproject.toml",
+    "pytest.ini",
+    "ruff.toml",
+    ".ruff.toml",
+    "environment.yml",
+    "requirements.txt",
+    "README.md"
+) | Where-Object { Test-Path $_ }
+
+Compress-Archive `
+    -Path $files `
+    -DestinationPath "NN_AFM_review.zip" `
+    -Force

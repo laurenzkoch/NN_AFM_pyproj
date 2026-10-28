@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import math
 import sys
 from collections.abc import Generator
 from multiprocessing import get_context
@@ -55,10 +56,12 @@ setattr(tkinter, "Tk", _forbid_external_start)
 
 from src.config.config_mcad_parameters import (  # noqa: E402
     AXIS_LIST,
+    CSV_DECIMAL_PLACES,
     CSV_PARAMETERS,
     DEFAULT_VALUES,
     MAP_SIZE,
     OUTPUT_NEURON_LIST,
+    REFERENCE_SPEED_RPM,
 )
 from src.modules.data_managment.experiment_utils import canonical_hash  # noqa: E402
 from src.modules.data_managment.simulation_metadata import (  # noqa: E402
@@ -77,16 +80,28 @@ from src.modules.Pipeline_and_GUI.events import PipelineEvent  # noqa: E402
 @pytest.fixture
 def metadata() -> SimulationMetadata:
     payload: SimulationPayload = {
-        "metadata_version": 2,
+        "metadata_version": 3,
         "base_model_sha256": "1" * 64,
         "mcad_executable_sha256": "2" * 64,
         "integration_version": "synthetic-test",
         "external_dependency_revision": "test-revision",
         "external_dependency_hashes": {},
         "csv_columns": list(CSV_PARAMETERS),
-        "float_decimal_places": 4,
+        "float_decimal_places": CSV_DECIMAL_PLACES,
+        "speed_normalization": (
+            "shaft_speed_rpm / base_speed_rpm"
+        ),
+        "reference_speed_rpm": REFERENCE_SPEED_RPM,
+        "reference_current_a": 0.0,
+        "back_emf_constant_definition": (
+            "fundamental line-line peak / mechanical angular speed; V*s/rad"
+        ),
     }
-    return {"fingerprint": canonical_hash(payload), "payload": payload}
+
+    return {
+        "fingerprint": canonical_hash(payload),
+        "payload": payload,
+    }
 
 
 @pytest.fixture
@@ -106,34 +121,93 @@ def event_queues() -> Generator[
         logs.join_thread()
 
 
-def make_frame(machine_count: int = 6, first_machine: int = 0) -> pd.DataFrame:
-    """Vollständige globale Kennfelder; Werte sind synthetisch, nicht physikalisch."""
+def make_frame(
+    machine_count: int = 6,
+    first_machine: int = 0,
+) -> pd.DataFrame:
+    """Create complete synthetic maps with consistent reference data."""
     loader = DataLoader(Path("unused"))
-    rows: list[dict[str, float]] = []
     axes = loader.map_axes
-    for machine in range(first_machine, first_machine + machine_count):
-        for speed in axes[AXIS_LIST[0]]:
-            for q_current in axes[AXIS_LIST[1]]:
-                for d_current in axes[AXIS_LIST[2]]:
+
+    rows: list[dict[str, float]] = []
+    points_per_map = math.prod(MAP_SIZE)
+
+    for machine in range(
+        first_machine,
+        first_machine + machine_count,
+    ):
+        dc_bus_voltage_v = 800.0
+        reference_ke = 2.0 + machine * 0.01
+
+        base_speed_rpm = (
+            dc_bus_voltage_v
+            / reference_ke
+            * 60.0
+            / math.tau
+        )
+
+        for speed_norm in axes[AXIS_LIST[0]]:
+            for q_density in axes[AXIS_LIST[1]]:
+                for d_density in axes[AXIS_LIST[2]]:
+                    current_density = math.hypot(
+                        float(q_density),
+                        float(d_density),
+                    )
+
+                    # Synthetic conductor area: 1 mm².
+                    # RMS phase currents therefore numerically equal
+                    # the corresponding RMS current densities.
+                    peak_current = (
+                        math.sqrt(2.0) * current_density
+                    )
+
                     row = {
-                        name: float(DEFAULT_VALUES.get(name, 1))
+                        name: float(DEFAULT_VALUES.get(name, 1.0))
                         for name in CSV_PARAMETERS
                     }
+
                     row.update(
                         {
                             "Stator_Bore": 70.0 + machine,
                             "Stator_Lam_Dia": 150.0 + 2 * machine,
                             "Magnet_Thickness": 10.0,
-                            "PeakCurrent": 2**0.5,
-                            "RMSCurrentDensity": 1.0,
-                            "ShaftSpeed": float(speed) * (150.0 + 2 * machine),
-                            "RMSPhaseCurrent_D": float(d_current),
-                            "RMSPhaseCurrent_Q": float(q_current),
+                            "DCBusVoltage": dc_bus_voltage_v,
+                            "ReferenceSpeedRPM": REFERENCE_SPEED_RPM,
+                            "ReferenceKeFundamental": reference_ke,
+                            "ReferencePeakBackEMFPhase": (
+                                100.0 + machine
+                            ),
+                            "BaseSpeedRPM": base_speed_rpm,
+                            "ShaftSpeedNorm": float(speed_norm),
+                            "ShaftSpeed": (
+                                float(speed_norm) * base_speed_rpm
+                            ),
+                            "PeakCurrent": peak_current,
+                            "RMSCurrentDensity": current_density,
+                            "RMSPhaseCurrent_D": float(d_density),
+                            "RMSPhaseCurrent_Q": float(q_density),
+                            "PhaseAdvance": math.degrees(
+                                math.atan2(
+                                    -float(d_density),
+                                    float(q_density),
+                                )
+                            ),
                         }
                     )
-                    for channel, name in enumerate(OUTPUT_NEURON_LIST):
-                        row[name] = machine * 100.0 + len(rows) % 125 + channel
+
+                    point_index = len(rows) % points_per_map
+
+                    for channel, name in enumerate(
+                        OUTPUT_NEURON_LIST
+                    ):
+                        row[name] = (
+                            machine * 100.0
+                            + point_index
+                            + channel
+                        )
+
                     rows.append(row)
+
     return pd.DataFrame(rows, columns=CSV_PARAMETERS)
 
 

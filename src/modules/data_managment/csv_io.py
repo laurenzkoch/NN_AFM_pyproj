@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.config.config_mcad_parameters import CSV_DECIMAL_PLACES
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,8 +31,8 @@ def write_row_in_csv(path_results: Path, value_row: Iterable[float]) -> None:
     with open(path_results, mode="a", newline="", encoding="utf-8") as file:
         writer = csv.writer(file, delimiter=";", quotechar='"')
         formatted_value_row = [
-            f"{x:.4f}".replace(".", ",") if isinstance(x, float) else x
-            for x in value_row
+            f"{float(value):.{CSV_DECIMAL_PLACES}f}".replace(".", ",")
+            for value in value_row
         ]
         writer.writerow(formatted_value_row)
 

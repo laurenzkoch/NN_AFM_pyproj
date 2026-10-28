@@ -1,7 +1,9 @@
 D_CURRENT_DENSITY: tuple[float, float] = (-10, 0)
 Q_CURRENT_DENSITY: tuple[float, float] = (1, 25)
-# shaft_speed_norm = shaft_speed / (d_sa*pi)
-SHAFT_SPEED_NORM: tuple[float, float] = (0.05, 1)
+# shaft_speed_norm = shaft_speed_rpm / base_speed_rpm
+# base_speed_rpm: no-load voltage-limit speed for ideal linear SVPWM
+SHAFT_SPEED_NORM: tuple[float, float] = (0.05, 1.0)
+REFERENCE_SPEED_RPM: float = 1000.0
 MAP_SIZE: tuple[int, int, int] = (5, 5, 5)
 
 POLE_NUMBER: int = 12
@@ -70,6 +72,7 @@ SIM_IN_GEO_PARAMETERS = [
 
 OP_PARAMETERS = [
     "ShaftSpeed",
+    "DCBusVoltage",
     "RMSPhaseCurrent_D",
     "RMSPhaseCurrent_Q",
     "RMSCurrentDensity",
@@ -87,7 +90,25 @@ OUTPUT_NEURON_LIST = [
     "RotorIronLoss_Total",
 ]
 
-CSV_PARAMETERS: list[str] = SIM_IN_GEO_PARAMETERS + OP_PARAMETERS + OUTPUT_NEURON_LIST
+CSV_DECIMAL_PLACES: int = 12
+MCAD_RESULT_PARAMETERS: list[str] = (
+    SIM_IN_GEO_PARAMETERS
+    + OP_PARAMETERS
+    + OUTPUT_NEURON_LIST
+)
+
+REFERENCE_CSV_PARAMETERS: list[str] = [
+    "ReferenceSpeedRPM",
+    "ReferenceKeFundamental",
+    "ReferencePeakBackEMFPhase",
+    "BaseSpeedRPM",
+    "ShaftSpeedNorm",
+]
+
+CSV_PARAMETERS: list[str] = (
+    MCAD_RESULT_PARAMETERS
+    + REFERENCE_CSV_PARAMETERS
+)
 
 GEO_PARAMETERS = [
     "Airgap",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Generator, Iterable
 from concurrent.futures import (
     FIRST_COMPLETED,
@@ -12,12 +13,19 @@ from dataclasses import dataclass
 from itertools import batched
 from multiprocessing.queues import Queue as ProcessQueue
 from pathlib import Path
+from typing import Literal, overload
 
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
-from src.config.config_mcad_parameters import CSV_PARAMETERS
+from src.config.config_mcad_parameters import (
+    CSV_DECIMAL_PLACES,
+    CSV_PARAMETERS,
+    DEFAULT_VALUES,
+    MCAD_RESULT_PARAMETERS,
+    REFERENCE_CSV_PARAMETERS,
+)
 from src.config.config_paths import PATH_DATA_MCAD_RESULTS
 from src.modules.data_managment.csv_io import import_data_from_csv, write_row_in_csv
 from src.modules.data_managment.simulation_metadata import (
@@ -26,12 +34,11 @@ from src.modules.data_managment.simulation_metadata import (
     prepare_result_csv,
     read_metadata,
 )
-from src.modules.Pipeline_and_GUI.cancellation import (
-    CancellationToken,
-    PipelineCancelledError,
-)
+from src.modules.Pipeline_and_GUI.cancellation import CancellationToken
 from src.modules.Pipeline_and_GUI.events import EventType, PipelineEvent
 from src.modules.process.motor_cad_processes import mcad_instance_handling
+from src.modules.process.motor_cad_processes.mcad_processing import MCADProcessor
+from src.modules.simulation.reference_run import ReferenceRunResult
 
 logger = logging.getLogger(__name__)
 
@@ -39,38 +46,87 @@ type KnownPoint = tuple[int | float, ...]
 type KnownPointsBySource = dict[str, set[KnownPoint]]
 
 
+@dataclass(frozen=True, slots=True)
+class OperatingPoint:
+    parameters: dict[str, float]
+    reference: ReferenceRunResult
+    base_speed_rpm: float
+    dc_bus_voltage_v: float
+    shaft_speed_norm: float
+
+    def csv_reference_values(self) -> dict[str, float]:
+        return {
+            "ReferenceSpeedRPM": self.reference.reference_speed_rpm,
+            "ReferenceKeFundamental": (
+                self.reference.back_emf_constant_ll_peak_vs_per_rad
+            ),
+            "ReferencePeakBackEMFPhase": (
+                self.reference.peak_back_emf_phase_v
+            ),
+            "BaseSpeedRPM": self.base_speed_rpm,
+            "ShaftSpeedNorm": self.shaft_speed_norm,
+        }
+
 @dataclass
 class PendingRequest:
     schema: tuple[str, ...]
     point: NDArray[np.float64]
     future: Future[tuple[list[float] | None, bool]]
+    operating_point: OperatingPoint
     count: int = 1
+
+def _set_mcad_parameters(
+    mcad: MCADProcessor,
+    parameters: dict[str, float],
+) -> None:
+    for name, value in parameters.items():
+        if isinstance(value, np.generic):
+            value = value.item()
+
+        if name == "Pole_Number":
+            points_per_cycle = mcad.get_value_from_mcad(
+                "TorquePointsPerCycle"
+            )
+            mesh_points = value / 2 * points_per_cycle
+
+            if mesh_points < 360:
+                mesh_points *= 4
+
+            mcad.set_value_in_mcad(
+                "AirgapMeshPoints_mesh",
+                mesh_points,
+            )
+            mcad.set_value_in_mcad(
+                "AirgapMeshPoints_layers",
+                mesh_points,
+            )
+
+        mcad.set_value_in_mcad(name, value)
+
+@overload
+def _execute_simulation(
+    parameter_dict: dict[str, float],
+    true_for_reference_run: Literal[False] = False,
+) -> tuple[list[float] | None, bool]: ...
+
+
+@overload
+def _execute_simulation(
+    parameter_dict: dict[str, float],
+    true_for_reference_run: Literal[True],
+) -> ReferenceRunResult | None: ...
 
 
 def _execute_simulation(
     parameter_dict: dict[str, float],
-) -> tuple[list[float] | None, bool]:
+    true_for_reference_run: bool = False,
+) -> tuple[list[float] | None, bool] | ReferenceRunResult | None:
     try:
         mcad = mcad_instance_handling.get_mcad_instance()
+        _set_mcad_parameters(mcad, parameter_dict)
 
-        for name, value in parameter_dict.items():
-            # np.float64, np.int64 etc. -> Python float/int
-            if isinstance(value, np.generic):
-                value = value.item()
-
-            if name == "Pole_Number":
-                tppc = mcad.get_value_from_mcad("TorquePointsPerCycle")
-                mesh_points = value / 2 * tppc
-                if mesh_points < 360:
-                    mesh_points = 4 * mesh_points
-                mcad.set_value_in_mcad(
-                    variable_name="AirgapMeshPoints_mesh", value=mesh_points
-                )
-                mcad.set_value_in_mcad(
-                    variable_name="AirgapMeshPoints_layers", value=mesh_points
-                )
-
-            mcad.set_value_in_mcad(name, value)
+        if true_for_reference_run:
+            return mcad.execute_reference_run()
 
         return mcad.execute_mcad_simulation()
 
@@ -78,23 +134,71 @@ def _execute_simulation(
         try:
             mcad_instance_handling.shutdown_mcad_instance()
         except Exception:
-            logger.exception("MCAD cleanup failed after simulation error")
+            logger.exception(
+                "MCAD cleanup failed after simulation error"
+            )
         raise
 
+def _execute_reference_simulation(
+    parameter_dict: dict[str, float],
+) -> ReferenceRunResult | None:
+    return _execute_simulation(
+        parameter_dict,
+        true_for_reference_run=True,
+    )
 
 class MCADSimulation:
     def __init__(
-        self,
-        point_generator: Generator[dict[str, float]],
-        batch_size: int,
-        progress_queue: ProcessQueue[PipelineEvent],
-        log_queue: ProcessQueue[logging.LogRecord],
-        csv_path: Path,
-        num_workers: int,
-        temp_root: Path | None = None,
-        cancellation: CancellationToken | None = None,
+            self,
+            geometry_generator: Generator[dict[str, float]],
+            operating_map: NDArray[np.float64],
+            batch_size: int,
+            progress_queue: ProcessQueue[PipelineEvent],
+            log_queue: ProcessQueue[logging.LogRecord],
+            csv_path: Path,
+            num_workers: int,
+            temp_root: Path | None = None,
+            cancellation: CancellationToken | None = None,
     ) -> None:
-        self.point_generator = point_generator
+        if type(batch_size) is not int or batch_size < 1:
+            raise ValueError("batch_size must be a positive integer.")
+
+        if type(num_workers) is not int or num_workers < 1:
+            raise ValueError("num_workers must be a positive integer.")
+
+        validated_map = np.array(
+            operating_map,
+            dtype=np.float64,
+            copy=True,
+        )
+
+        if (
+                validated_map.ndim != 2
+                or validated_map.shape[1] != 3
+                or validated_map.shape[0] == 0
+        ):
+            raise ValueError(
+                "operating_map must have shape (N, 3) with N greater than zero."
+            )
+
+        if not np.isfinite(validated_map).all():
+            raise ValueError("operating_map must contain only finite values.")
+
+        if (validated_map[:, 0] < 0).any():
+            raise ValueError("Normalized speed must not be negative.")
+
+        validated_map.setflags(write=False)
+
+        points_per_geometry = len(validated_map)
+
+        if batch_size % points_per_geometry != 0:
+            raise ValueError(
+                "batch_size must be a multiple of the operating-map size."
+            )
+
+
+        self.geometry_generator = geometry_generator
+        self.operating_map: NDArray[np.float64] = validated_map
         self.batch_size = batch_size
         self.progress_queue: ProcessQueue[PipelineEvent] = progress_queue
         self.log_queue: ProcessQueue[logging.LogRecord] = log_queue
@@ -113,26 +217,189 @@ class MCADSimulation:
             KnownPointsBySource,
         ] = {}
 
+    def _generate_operating_points(
+            self,
+            geometry: dict[str, float],
+            reference: ReferenceRunResult,
+            dc_bus_voltage_v: float,
+    ) -> Generator[OperatingPoint]:
+        base_speed_rpm = reference.calculate_base_speed_rpm(
+            dc_bus_voltage_v
+        )
+
+        for speed_norm, q_density, d_density in self.operating_map:
+            self.cancellation.raise_if_requested()
+
+            shaft_speed_norm = float(speed_norm)
+            q_current_density = float(q_density)
+            d_current_density = float(d_density)
+
+            shaft_speed_rpm = shaft_speed_norm * base_speed_rpm
+            current_density = math.hypot(
+                q_current_density,
+                d_current_density,
+            )
+            phase_advance = math.degrees(
+                math.atan2(-d_current_density, q_current_density)
+            )
+
+            if not all(
+                    math.isfinite(value)
+                    for value in (
+                            shaft_speed_rpm,
+                            current_density,
+                            phase_advance,
+                    )
+            ):
+                raise ValueError(
+                    "Operating-point conversion produced nonfinite values."
+                )
+
+            parameters = {
+                **geometry,
+                "DCBusVoltage": dc_bus_voltage_v,
+                "ShaftSpeed": shaft_speed_rpm,
+                "RMSCurrentDensity": current_density,
+                "PhaseAdvance": phase_advance,
+            }
+
+            yield OperatingPoint(
+                parameters=parameters,
+                reference=reference,
+                base_speed_rpm=base_speed_rpm,
+                dc_bus_voltage_v=dc_bus_voltage_v,
+                shaft_speed_norm=shaft_speed_norm,
+            )
+
+    def _wait_for_reference(
+            self,
+            future: Future[ReferenceRunResult | None],
+    ) -> ReferenceRunResult | None:
+        while True:
+            self.cancellation.raise_if_requested()
+
+            completed, _ = wait(
+                [future],
+                timeout=0.1,
+                return_when=FIRST_COMPLETED,
+            )
+
+            self.cancellation.raise_if_requested()
+
+            if completed:
+                return future.result()
+
     def prepare_output(self) -> None:
         prepare_result_csv(self.csv_path, self.expected_metadata)
 
     def run(self) -> None:
+        self.cancellation.raise_if_requested()
+
+        dc_bus_voltage_v = float(DEFAULT_VALUES["DCBusVoltage"])
+
+        if not math.isfinite(dc_bus_voltage_v) or dc_bus_voltage_v <= 0:
+            raise ValueError(
+                "DCBusVoltage must be finite and positive."
+            )
+
+        geometries_per_pool = (
+                self.batch_size // len(self.operating_map)
+        )
+
+        for geometry_batch in batched(
+                self.geometry_generator,
+                geometries_per_pool,
+        ):
+            self.cancellation.raise_if_requested()
+
+            self._run_geometry_batch(
+                geometry_batch,
+                dc_bus_voltage_v,
+            )
+
+        self.cancellation.raise_if_requested()
+
+    def _run_geometry_batch(
+            self,
+            geometries: Iterable[dict[str, float]],
+            dc_bus_voltage_v: float,
+    ) -> None:
+        self.cancellation.raise_if_requested()
+
+        executor = ProcessPoolExecutor(
+            max_workers=self.num_workers,
+            initializer=mcad_instance_handling.init_mcad_instance,
+            initargs=(self.log_queue, self.temp_root),
+        )
+
         try:
-            self.cancellation.raise_if_requested()
-
-            for batch in batched(self.point_generator, self.batch_size):
+            for geometry in geometries:
                 self.cancellation.raise_if_requested()
-                self._run_simulation_pool(batch)
+
+                logger.info("Starting reference run for geometry batch.")
+
+                reference_parameters = {
+                    **geometry,
+                    "DCBusVoltage": dc_bus_voltage_v,
+                }
+
+                reference_future = executor.submit(
+                    _execute_reference_simulation,
+                    reference_parameters,
+                )
+
+                reference = self._wait_for_reference(
+                    reference_future
+                )
+
+                if reference is None:
+                    logger.warning(
+                        "Skipping operating map because its "
+                        "reference run failed."
+                    )
+                    self._report_progress(
+                        "dropped",
+                        len(self.operating_map),
+                    )
+                    continue
+
+                base_speed_rpm = reference.calculate_base_speed_rpm(
+                    dc_bus_voltage_v
+                )
+
+                logger.info(
+                    "Reference completed: "
+                    "speed=%.6f rpm, "
+                    "Ke=%.12g V*s/rad, "
+                    "peak_phase_back_emf=%.6f V, "
+                    "dc_bus_voltage=%.6f V, "
+                    "base_speed=%.6f rpm",
+                    reference.reference_speed_rpm,
+                    reference.back_emf_constant_ll_peak_vs_per_rad,
+                    reference.peak_back_emf_phase_v,
+                    dc_bus_voltage_v,
+                    base_speed_rpm,
+                )
+
+                operating_points = self._generate_operating_points(
+                    geometry,
+                    reference,
+                    dc_bus_voltage_v,
+                )
+
+                self._run_simulation_batch(
+                    executor,
+                    operating_points,
+                )
 
             self.cancellation.raise_if_requested()
 
-        except PipelineCancelledError:
-            logger.info("Simulation cancelled: %s", self.csv_path.name)
+        except BaseException:
+            executor.kill_workers()
             raise
 
-        except Exception:
-            logger.exception("An error occurred during simulation.")
-            raise
+        else:
+            executor.shutdown(wait=True)
 
     def _get_csv_files(self) -> dict[str, pd.DataFrame]:
         result = {}
@@ -211,15 +478,22 @@ class MCADSimulation:
         for source in order:
             for record in sorted(known[source], key=lambda row: row[0]):
                 candidate = np.asarray(record[1:], dtype=float)
-                if np.all(np.abs(candidate - target) <= 1e-4):
+                if np.allclose(
+                        candidate,
+                        target,
+                        rtol=1e-10,
+                        atol=1e-9,
+                ):
                     return source, int(record[0])
         return None
 
     def _append_result(self, values_row: list[float]) -> None:
         if len(values_row) != len(CSV_PARAMETERS):
             raise ValueError("Wrong channel_result width")
-        # Match the existing CSV writer's four-decimal storage precision.
-        values = [float(f"{float(value):.4f}") for value in values_row]
+        values = [
+            float(f"{float(value):.{CSV_DECIMAL_PLACES}f}")
+            for value in values_row
+        ]
         if not np.isfinite(values).all():
             raise ValueError("Nonfinite simulation channel_result")
         write_row_in_csv(self.csv_path, values)
@@ -253,12 +527,19 @@ class MCADSimulation:
     def _submit_batch(
         self,
         executor: ProcessPoolExecutor,
-        batch: Iterable[dict[str, float]],
+        batch: Iterable[OperatingPoint],
         requests: list[PendingRequest],
     ) -> None:
-        for parameters in batch:
+        for operating_point in batch:
             self.cancellation.raise_if_requested()
-            known = self._find_known_result(parameters)
+
+            parameters = operating_point.parameters
+            lookup_parameters = {
+                **parameters,
+                **operating_point.csv_reference_values(),
+            }
+
+            known = self._find_known_result(lookup_parameters)
 
             if known is not None:
                 source, row_index = known
@@ -277,15 +558,23 @@ class MCADSimulation:
 
                 continue
 
-            schema = tuple(parameters)
-            point = np.asarray(tuple(parameters.values()), dtype=float)
+            schema = tuple(lookup_parameters)
+            point = np.asarray(
+                tuple(lookup_parameters.values()),
+                dtype=np.float64,
+            )
 
             duplicate = next(
                 (
                     request
                     for request in requests
                     if request.schema == schema
-                    and np.all(np.abs(request.point - point) <= 1e-4)
+                       and np.allclose(
+                            request.point,
+                            point,
+                            rtol=1e-10,
+                            atol=1e-9,
+                       )
                 ),
                 None,
             )
@@ -301,6 +590,7 @@ class MCADSimulation:
                     schema=schema,
                     point=point,
                     future=future,
+                    operating_point=operating_point,
                 )
             )
 
@@ -337,38 +627,36 @@ class MCADSimulation:
                     )
 
                 self.cancellation.raise_if_requested()
-                self._append_result(row)
+                if len(row) != len(MCAD_RESULT_PARAMETERS):
+                    raise ValueError("Wrong Motor-CAD result width.")
+
+                reference_values = request.operating_point.csv_reference_values()
+
+                csv_row = [
+                    *row,
+                    *(
+                        reference_values[name]
+                        for name in REFERENCE_CSV_PARAMETERS
+                    ),
+                ]
+
+                self._append_result(csv_row)
                 self._report_progress("simulated", request.count)
 
-    def _run_simulation_pool(
-        self,
-        batch_machine_generator_instance: Iterable[dict[str, float]],
+    def _run_simulation_batch(
+            self,
+            executor: ProcessPoolExecutor,
+            batch: Iterable[OperatingPoint],
     ) -> None:
         self.cancellation.raise_if_requested()
 
         requests: list[PendingRequest] = []
 
-        executor: ProcessPoolExecutor = ProcessPoolExecutor(
-            max_workers=self.num_workers,
-            initializer=mcad_instance_handling.init_mcad_instance,
-            initargs=(self.log_queue, self.temp_root),
+        self._submit_batch(
+            executor,
+            batch,
+            requests,
         )
+        self._collect_results(requests)
 
-        try:
-            self._submit_batch(
-                executor,
-                batch_machine_generator_instance,
-                requests,
-            )
-            self._collect_results(requests)
-            self.cancellation.raise_if_requested()
-
-        except BaseException:
-            for request in requests:
-                request.future.cancel()
-
-            executor.kill_workers()
-            raise
-
-        else:
-            executor.shutdown(wait=True)
+        self.cancellation.raise_if_requested()

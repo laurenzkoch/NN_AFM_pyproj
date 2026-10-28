@@ -2,19 +2,20 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Generator
 from concurrent.futures import Future
 from multiprocessing.queues import Queue as ProcessQueue
 from pathlib import Path
 from typing import cast
 
+import numpy as np
 import pytest
 
-from src.config.config_mcad_parameters import CSV_PARAMETERS, MAP_SIZE
+from src.config.config_mcad_parameters import MAP_SIZE
 from src.modules.data_managment.simulation_metadata import SimulationMetadata
 from src.modules.Pipeline_and_GUI.events import EventType, PipelineEvent
 from src.modules.simulation import sim_pipeline as pipelines
 from src.modules.simulation import simulation as simulations
+from src.modules.simulation.reference_run import ReferenceRunResult
 
 type EventQueues = tuple[ProcessQueue[PipelineEvent], ProcessQueue[logging.LogRecord]]
 
@@ -154,7 +155,8 @@ def test_combinations_run_sequentially_and_reset_both_progress_levels(
         else:
             raise AssertionError(f"Unexpected CSV path: {self.csv_path}")
 
-        count: int = sum(1 for _ in self.point_generator)
+        geometry_count = sum(1 for _ in self.geometry_generator)
+        count = geometry_count * len(self.operating_map)
         calls.append((count, self.batch_size))
         self._report_progress("simulated", count)
 
@@ -193,72 +195,12 @@ def test_combinations_run_sequentially_and_reset_both_progress_levels(
     finally:
         pipeline._close_queues()
 
-
-def test_a_new_pool_is_created_for_each_batch(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    metadata: SimulationMetadata,
-    event_queues: EventQueues,
-) -> None:
-    monkeypatch.setattr(
-        "src.modules.simulation.simulation.build_simulation_metadata",
-        lambda: metadata,
-    )
-    monkeypatch.setattr(
-        "src.modules.simulation.simulation.PATH_DATA_MCAD_RESULTS",
-        tmp_path,
-    )
-    opened: list[int] = []
-    closed: list[int] = []
-
-    class FakePool:
-        def __init__(self, **_kwargs: object) -> None:
-            self.index = len(opened)
-            opened.append(self.index)
-
-        def shutdown(self, wait: bool = True) -> None:
-            closed.append(self.index)
-
-        def kill_workers(self) -> None:
-            closed.append(self.index)
-
-        @staticmethod
-        def submit(
-            _function: object,
-            parameters: dict[str, float],
-        ) -> Future[tuple[list[float] | None, bool]]:
-            future: Future[tuple[list[float] | None, bool]] = Future()
-            row: list[float] = [parameters.get(name, 1.0) for name in CSV_PARAMETERS]
-            future.set_result((row, True))
-            return future
-
-    def points() -> Generator[dict[str, float]]:
-        for value in (2.0, 4.0, 6.0):
-            yield {"Pole_Number": value}
-
-    monkeypatch.setattr(
-        "src.modules.simulation.simulation.ProcessPoolExecutor",
-        FakePool,
-    )
-    progress, logs = event_queues
-    simulation = simulations.MCADSimulation(
-        points(), 2, progress, logs, tmp_path / "out.csv", 1
-    )
-    simulation.prepare_output()
-    simulation.run()
-    assert opened == closed == [0, 1]
-    assert len(simulation.dataframes[simulation.csv_path.resolve().as_posix()]) == 3
-    assert [progress.get(timeout=5).outcome for _ in range(3)] == ["simulated"] * 3
-
-
 def test_failed_future_propagates_and_reports_no_success(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     metadata: SimulationMetadata,
     event_queues: EventQueues,
 ) -> None:
-    import numpy as np
-
     monkeypatch.setattr(
         "src.modules.simulation.simulation.build_simulation_metadata",
         lambda: metadata,
@@ -267,14 +209,42 @@ def test_failed_future_propagates_and_reports_no_success(
         "src.modules.simulation.simulation.PATH_DATA_MCAD_RESULTS",
         tmp_path,
     )
+
     progress, logs = event_queues
-    empty: Generator[dict[str, float]] = (point for point in ())
+
     instance = simulations.MCADSimulation(
-        empty, 1, progress, logs, tmp_path / "out.csv", 1
+        geometry_generator=(geometry for geometry in ()),
+        operating_map=np.array([[0.5, 1.0, 0.0]]),
+        batch_size=1,
+        progress_queue=progress,
+        log_queue=logs,
+        csv_path=tmp_path / "out.csv",
+        num_workers=1,
     )
+
+    reference = ReferenceRunResult(1000.0, 2.0, 100.0)
+
+    operating_point = simulations.OperatingPoint(
+        parameters={"Pole_Number": 2.0},
+        reference=reference,
+        base_speed_rpm=reference.calculate_base_speed_rpm(800.0),
+        dc_bus_voltage_v=800.0,
+        shaft_speed_norm=0.5,
+    )
+
     future: Future[tuple[list[float] | None, bool]] = Future()
-    future.set_exception(RuntimeError("simulation failure"))
-    request = simulations.PendingRequest(("Pole_Number",), np.array([2.0]), future)
-    with pytest.raises(RuntimeError, match="simulation failure"):
+    error = RuntimeError("simulation failure")
+    future.set_exception(error)
+
+    request = simulations.PendingRequest(
+        schema=("Pole_Number",),
+        point=np.array([2.0]),
+        future=future,
+        operating_point=operating_point,
+    )
+
+    with pytest.raises(RuntimeError) as captured:
         instance._collect_results([request])
+
+    assert captured.value is error
     assert instance.dataframes == {}

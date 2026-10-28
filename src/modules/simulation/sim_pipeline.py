@@ -27,6 +27,7 @@ from src.modules.Pipeline_and_GUI.events import EventType, PipelineEvent
 from src.modules.Pipeline_and_GUI.pipeline import MyPipeline
 from src.modules.process.eduvpn import EDUVPNProcessor
 from src.modules.simulation.generators.machine_generator import AFMMachineGenerator
+from src.modules.simulation.generators.map_generator import map_generator
 from src.modules.simulation.simulation import MCADSimulation
 
 GeneratorType = Literal["v1", "v2"]
@@ -85,17 +86,21 @@ class SimulationSeries:
                 )
             )
 
-            generator = AFMMachineGenerator(
+            machine_generator = AFMMachineGenerator(
                 num_base_designs=job.num_base_designs,
                 num_lam_designs=job.num_lam_designs,
-                num_data_points=job.point_count,
             )
+
+            operating_map = map_generator()
 
             workers: int = min(self.num_workers, job.point_count)
 
             simulation = MCADSimulation(
-                point_generator=generator.get_generator(_type=self.gen_type),
-                batch_size=workers * math.prod(MAP_SIZE),
+                geometry_generator=machine_generator.get_generator(
+                    _type=self.gen_type,
+                ),
+                operating_map=operating_map,
+                batch_size=workers * len(operating_map),
                 progress_queue=self.progress_queue,
                 log_queue=self.log_queue,
                 csv_path=job.csv_path,

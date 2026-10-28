@@ -6,15 +6,9 @@ def main() -> None:
     configure_application_logging()
 
     combinations: list[tuple[int, int]] = [
-        (1, 100),
-        (1, 200),
-        (1, 300),
-        (100, 1),
-        (200, 1),
-        (300, 1),
-        (100, 100),
-        (200, 200),
-        (300, 300),
+        (1, 10),
+        (1, 20),
+        (1, 30),
     ]
 
     pipeline = SimulationPipeline(
