@@ -91,7 +91,12 @@ def pool_double(monkeypatch):
         def submit(
                 function,
                 parameters,
+                *,
+                log_context: str = "",
         ):
+            assert "batch=" in log_context
+            assert "geometry=" in log_context
+            assert "task=" in log_context
             assert function in (
                 simulations._execute_simulation,
                 simulations._execute_reference_simulation,

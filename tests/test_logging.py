@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from concurrent.futures import ProcessPoolExecutor
 from logging.handlers import QueueListener
 from multiprocessing import get_context
@@ -17,7 +18,9 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.subprocess
 def test_all_phases_and_worker_use_exactly_one_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
         "src.config.config_logging.PATH_LOGS",
@@ -26,6 +29,8 @@ def test_all_phases_and_worker_use_exactly_one_file(
     root = logging.getLogger()
     saved_handlers = root.handlers.copy()
     saved_level = root.level
+    project_logger = logging.getLogger("src")
+    saved_project_level = project_logger.level
     context = get_context("spawn")
     queue: ProcessQueue[logging.LogRecord] = context.Queue()
     application_handlers: list[logging.Handler] = []
@@ -46,7 +51,7 @@ def test_all_phases_and_worker_use_exactly_one_file(
                 initializer=config_logging.setup_worker_logging,
                 initargs=(queue,),
             ) as pool:
-                pool.submit(write_markers).result(timeout=30)
+                worker_pid = pool.submit(write_markers).result(timeout=30)
         finally:
             active_listener.stop()
             root.handlers[:] = application_handlers
@@ -67,8 +72,24 @@ def test_all_phases_and_worker_use_exactly_one_file(
             "WORKER_INFO_TEST",
             "WORKER_ERROR_TEST",
             "AFTER_PIPELINE_TEST",
+            "WORKER_DEBUG_TEST"
         ):
             assert content.count(marker) == 1
+        debug_line = next(
+            line
+            for line in content.splitlines()
+            if "WORKER_DEBUG_TEST" in line
+        )
+
+        assert worker_pid != os.getpid()
+        assert f"pid={worker_pid}" in debug_line
+        assert "process=" in debug_line
+        assert "thread=" in debug_line
+
+        console_output = capsys.readouterr()
+
+        assert "WORKER_DEBUG_TEST" not in console_output.err
+        assert "WORKER_INFO_TEST" in console_output.err
         assert not list(tmp_path.glob("*_info.txt"))
         assert not list(tmp_path.glob("*_error.txt"))
     finally:
@@ -78,6 +99,7 @@ def test_all_phases_and_worker_use_exactly_one_file(
                 handler.close()
         root.handlers[:] = saved_handlers
         root.setLevel(saved_level)
+        project_logger.setLevel(saved_project_level)
         for handler in application_handlers:
             handler.close()
         queue.close()

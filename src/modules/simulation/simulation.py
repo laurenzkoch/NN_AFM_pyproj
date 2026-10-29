@@ -9,11 +9,13 @@ from concurrent.futures import (
     ProcessPoolExecutor,
     wait,
 )
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import batched
 from multiprocessing.queues import Queue as ProcessQueue
 from pathlib import Path
+from time import perf_counter
 from typing import Literal, overload
+from uuid import uuid4
 
 import numpy as np
 import pandas as pd
@@ -37,6 +39,9 @@ from src.modules.data_managment.simulation_metadata import (
 from src.modules.Pipeline_and_GUI.cancellation import CancellationToken
 from src.modules.Pipeline_and_GUI.events import EventType, PipelineEvent
 from src.modules.process.motor_cad_processes import mcad_instance_handling
+from src.modules.process.motor_cad_processes.mcad_errors import (
+    MCADResultError,
+)
 from src.modules.process.motor_cad_processes.mcad_processing import MCADProcessor
 from src.modules.simulation.reference_run import ReferenceRunResult
 
@@ -53,6 +58,7 @@ class OperatingPoint:
     base_speed_rpm: float
     dc_bus_voltage_v: float
     shaft_speed_norm: float
+    log_context: str = ""
 
     def csv_reference_values(self) -> dict[str, float]:
         return {
@@ -74,6 +80,8 @@ class PendingRequest:
     future: Future[tuple[list[float] | None, bool]]
     operating_point: OperatingPoint
     count: int = 1
+    log_context: str = ""
+    submitted_at: float = field(default_factory=perf_counter)
 
 def _set_mcad_parameters(
     mcad: MCADProcessor,
@@ -107,6 +115,8 @@ def _set_mcad_parameters(
 def _execute_simulation(
     parameter_dict: dict[str, float],
     true_for_reference_run: Literal[False] = False,
+    *,
+    log_context: str = "",
 ) -> tuple[list[float] | None, bool]: ...
 
 
@@ -114,37 +124,98 @@ def _execute_simulation(
 def _execute_simulation(
     parameter_dict: dict[str, float],
     true_for_reference_run: Literal[True],
+    *,
+    log_context: str = "",
 ) -> ReferenceRunResult | None: ...
 
 
 def _execute_simulation(
     parameter_dict: dict[str, float],
     true_for_reference_run: bool = False,
+    *,
+    log_context: str = "",
 ) -> tuple[list[float] | None, bool] | ReferenceRunResult | None:
+
+    context = log_context or f"task={uuid4().hex[:12]}"
+    kind = "reference" if true_for_reference_run else "load"
+    phase = "instance_lookup"
+    started = perf_counter()
+
+    logger.info(
+        "Worker task started: %s kind=%s",
+        context,
+        kind,
+    )
+    logger.debug(
+        "Worker task parameters: %s parameters=%r",
+        context,
+        parameter_dict,
+    )
+
     try:
         mcad = mcad_instance_handling.get_mcad_instance()
+
+        phase = "parameter_assignment"
         _set_mcad_parameters(mcad, parameter_dict)
 
+        phase = f"{kind}_calculation"
+
+        result: (
+            tuple[list[float] | None, bool]
+            | ReferenceRunResult
+            | None
+        )
+
         if true_for_reference_run:
-            return mcad.execute_reference_run()
+            result = mcad.execute_reference_run()
+            outcome = "rejected" if result is None else "completed"
+        else:
+            result = mcad.execute_mcad_simulation()
+            outcome = "completed" if result[1] else "rejected"
 
-        return mcad.execute_mcad_simulation()
+        logger.info(
+            "Worker task finished: "
+            "%s kind=%s outcome=%s elapsed_s=%.3f",
+            context,
+            kind,
+            outcome,
+            perf_counter() - started,
+        )
 
-    except BaseException:
+        return result
+
+    except BaseException as exc:
+        logger.error(
+            "Worker task failed: "
+            "%s kind=%s phase=%s elapsed_s=%.3f "
+            "error_type=%s detail=%s",
+            context,
+            kind,
+            phase,
+            perf_counter() - started,
+            type(exc).__name__,
+            exc,
+        )
+
         try:
             mcad_instance_handling.shutdown_mcad_instance()
         except Exception:
             logger.exception(
-                "MCAD cleanup failed after simulation error"
+                "Unexpected worker cleanup error: %s",
+                context,
             )
+
         raise
 
 def _execute_reference_simulation(
     parameter_dict: dict[str, float],
+    *,
+    log_context: str = "",
 ) -> ReferenceRunResult | None:
     return _execute_simulation(
         parameter_dict,
         true_for_reference_run=True,
+        log_context=log_context,
     )
 
 class MCADSimulation:
@@ -222,6 +293,8 @@ class MCADSimulation:
             geometry: dict[str, float],
             reference: ReferenceRunResult,
             dc_bus_voltage_v: float,
+            *,
+            log_context: str = "",
     ) -> Generator[OperatingPoint]:
         base_speed_rpm = reference.calculate_base_speed_rpm(
             dc_bus_voltage_v
@@ -269,6 +342,7 @@ class MCADSimulation:
                 base_speed_rpm=base_speed_rpm,
                 dc_bus_voltage_v=dc_bus_voltage_v,
                 shaft_speed_norm=shaft_speed_norm,
+                log_context=log_context,
             )
 
     def _wait_for_reference(
@@ -326,54 +400,107 @@ class MCADSimulation:
     ) -> None:
         self.cancellation.raise_if_requested()
 
-        executor = ProcessPoolExecutor(
-            max_workers=self.num_workers,
-            initializer=mcad_instance_handling.init_mcad_instance,
-            initargs=(self.log_queue, self.temp_root),
+        batch_context = f"batch={uuid4().hex[:12]}"
+        started = perf_counter()
+        phase = "pool_creation"
+
+        logger.info(
+            "Process pool creation started: "
+            "%s workers=%d planned_load_point_limit=%d csv=%s",
+            batch_context,
+            self.num_workers,
+            self.batch_size,
+            self.csv_path,
         )
 
         try:
-            for geometry in geometries:
+            executor = ProcessPoolExecutor(
+                max_workers=self.num_workers,
+                initializer=mcad_instance_handling.init_mcad_instance,
+                initargs=(self.log_queue, self.temp_root),
+            )
+        except BaseException:
+            logger.error(
+                "Process pool creation failed: %s",
+                batch_context,
+            )
+            raise
+
+        logger.info(
+            "Process pool created; workers initialize on demand: %s",
+            batch_context,
+        )
+
+        geometry_count = 0
+
+        try:
+            for geometry_count, geometry in enumerate(
+                    geometries,
+                    start=1,
+            ):
                 self.cancellation.raise_if_requested()
 
-                logger.info("Starting reference run for geometry batch.")
+                geometry_context = (
+                    f"{batch_context} "
+                    f"geometry={uuid4().hex[:12]}"
+                )
+                reference_context = (
+                    f"{geometry_context} task={uuid4().hex[:12]}"
+                )
+
+                logger.debug(
+                    "Geometry parameters: %s parameters=%r",
+                    geometry_context,
+                    geometry,
+                )
 
                 reference_parameters = {
                     **geometry,
                     "DCBusVoltage": dc_bus_voltage_v,
                 }
 
+                phase = "reference_submission"
+                logger.info(
+                    "Submitting reference task: %s",
+                    reference_context,
+                )
+
                 reference_future = executor.submit(
                     _execute_reference_simulation,
                     reference_parameters,
+                    log_context=reference_context,
                 )
 
+                phase = "reference_wait"
                 reference = self._wait_for_reference(
                     reference_future
                 )
 
                 if reference is None:
                     logger.warning(
-                        "Skipping operating map because its "
-                        "reference run failed."
+                        "Reference rejected; skipping operating map: "
+                        "%s load_points=%d",
+                        geometry_context,
+                        len(self.operating_map),
                     )
+
                     self._report_progress(
                         "dropped",
                         len(self.operating_map),
                     )
                     continue
 
+                phase = "operating_point_conversion"
                 base_speed_rpm = reference.calculate_base_speed_rpm(
                     dc_bus_voltage_v
                 )
 
                 logger.info(
                     "Reference completed: "
-                    "speed=%.6f rpm, "
-                    "Ke=%.12g V*s/rad, "
-                    "peak_phase_back_emf=%.6f V, "
-                    "dc_bus_voltage=%.6f V, "
-                    "base_speed=%.6f rpm",
+                    "%s reference_speed_rpm=%.6f "
+                    "Ke=%.12g peak_phase_back_emf_v=%.6f "
+                    "dc_bus_voltage_v=%.6f base_speed_rpm=%.6f",
+                    reference_context,
                     reference.reference_speed_rpm,
                     reference.back_emf_constant_ll_peak_vs_per_rad,
                     reference.peak_back_emf_phase_v,
@@ -385,8 +512,10 @@ class MCADSimulation:
                     geometry,
                     reference,
                     dc_bus_voltage_v,
+                    log_context=geometry_context,
                 )
 
+                phase = "load_processing"
                 self._run_simulation_batch(
                     executor,
                     operating_points,
@@ -394,12 +523,50 @@ class MCADSimulation:
 
             self.cancellation.raise_if_requested()
 
-        except BaseException:
-            executor.kill_workers()
+        except BaseException as exc:
+            logger.error(
+                "Geometry batch aborted: "
+                "%s phase=%s elapsed_s=%.3f "
+                "error_type=%s detail=%s",
+                batch_context,
+                phase,
+                perf_counter() - started,
+                type(exc).__name__,
+                exc,
+            )
+
+            self._stop_pool_after_error(
+                executor,
+                batch_context,
+            )
             raise
 
         else:
-            executor.shutdown(wait=True)
+            logger.info(
+                "Closing process pool: %s",
+                batch_context,
+            )
+
+            try:
+                executor.shutdown(wait=True)
+            except BaseException:
+                logger.error(
+                    "Process pool shutdown failed: %s",
+                    batch_context,
+                )
+                self._stop_pool_after_error(
+                    executor,
+                    batch_context,
+                )
+                raise
+
+            logger.info(
+                "Geometry batch completed and pool shut down: "
+                "%s geometries=%d elapsed_s=%.3f",
+                batch_context,
+                geometry_count,
+                perf_counter() - started,
+            )
 
     def _get_csv_files(self) -> dict[str, pd.DataFrame]:
         result = {}
@@ -544,6 +711,14 @@ class MCADSimulation:
             if known is not None:
                 source, row_index = known
 
+                logger.debug(
+                    "Reusing existing result: "
+                    "%s source=%s row_index=%d",
+                    operating_point.log_context,
+                    source,
+                    row_index,
+                )
+
                 if source == self.csv_path.resolve().as_posix():
                     self._report_progress("existing")
                 else:
@@ -581,9 +756,30 @@ class MCADSimulation:
 
             if duplicate is not None:
                 duplicate.count += 1
+                logger.debug(
+                    "Combining duplicate request: "
+                    "%s original_task=%s count=%d",
+                    operating_point.log_context,
+                    duplicate.log_context,
+                    duplicate.count,
+                )
                 continue
 
-            future = executor.submit(_execute_simulation, parameters)
+            task_context = (
+                f"{operating_point.log_context} "
+                f"task={uuid4().hex[:12]}"
+            ).strip()
+
+            logger.debug(
+                "Submitting load task: %s",
+                task_context,
+            )
+
+            future = executor.submit(
+                _execute_simulation,
+                parameters,
+                log_context=task_context,
+            )
 
             requests.append(
                 PendingRequest(
@@ -591,6 +787,7 @@ class MCADSimulation:
                     point=point,
                     future=future,
                     operating_point=operating_point,
+                    log_context=task_context,
                 )
             )
 
@@ -615,20 +812,42 @@ class MCADSimulation:
                 self.cancellation.raise_if_requested()
 
                 request: PendingRequest = pending.pop(future)
-                row, succeeded = future.result()
+                try:
+                    row, succeeded = future.result()
+                except BaseException as exc:
+                    logger.error(
+                        "Load task result failed: "
+                        "%s turnaround_s=%.3f error_type=%s detail=%s",
+                        request.log_context,
+                        perf_counter() - request.submitted_at,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    raise
 
                 if not succeeded:
                     self._report_progress("dropped", request.count)
+                    logger.warning(
+                        "Load task rejected: %s count=%d",
+                        request.log_context,
+                        request.count,
+                    )
                     continue
 
                 if row is None:
-                    raise RuntimeError(
-                        "The simulation was successful but did not produce any results."
+                    raise MCADResultError(
+                        "Successful load task returned no results: "
+                        f"{request.log_context}"
                     )
 
                 self.cancellation.raise_if_requested()
                 if len(row) != len(MCAD_RESULT_PARAMETERS):
-                    raise ValueError("Wrong Motor-CAD result width.")
+                    raise MCADResultError(
+                        "Wrong Motor-CAD result width: "
+                        f"{request.log_context}; "
+                        f"expected={len(MCAD_RESULT_PARAMETERS)}, "
+                        f"actual={len(row)}"
+                    )
 
                 reference_values = request.operating_point.csv_reference_values()
 
@@ -640,7 +859,26 @@ class MCADSimulation:
                     ),
                 ]
 
-                self._append_result(csv_row)
+                try:
+                    self._append_result(csv_row)
+                except Exception:
+                    logger.exception(
+                        "Could not store load result: "
+                        "%s csv=%s",
+                        request.log_context,
+                        self.csv_path,
+                    )
+                    raise
+
+                logger.debug(
+                    "Load result stored: "
+                    "%s turnaround_s=%.3f count=%d csv=%s",
+                    request.log_context,
+                    perf_counter() - request.submitted_at,
+                    request.count,
+                    self.csv_path,
+                )
+
                 self._report_progress("simulated", request.count)
 
     def _run_simulation_batch(
@@ -660,3 +898,30 @@ class MCADSimulation:
         self._collect_results(requests)
 
         self.cancellation.raise_if_requested()
+
+    @staticmethod
+    def _stop_pool_after_error(
+            executor: ProcessPoolExecutor,
+            log_context: str,
+    ) -> None:
+        started = perf_counter()
+
+        logger.warning(
+            "Stopping process pool after error: %s",
+            log_context,
+        )
+
+        try:
+            executor.kill_workers()
+        except Exception:
+            logger.exception(
+                "Process pool termination failed: %s",
+                log_context,
+            )
+        else:
+            logger.info(
+                "Process pool termination completed: "
+                "%s elapsed_s=%.3f",
+                log_context,
+                perf_counter() - started,
+            )

@@ -83,7 +83,14 @@ def test_simulation_cancellation_kills_pool_and_stops_batches(
         def submit(
                 function: object,
                 _parameters: dict[str, float],
+                *,
+                log_context: str = "",
         ) -> WorkerFuture:
+
+            assert "batch=" in log_context
+            assert "geometry=" in log_context
+            assert "task=" in log_context
+
             assert function in (
                 simulations._execute_simulation,
                 simulations._execute_reference_simulation,
