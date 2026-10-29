@@ -3,6 +3,7 @@ NN_AFM_pyproj
 
 Motor-CAD-Simulationen und neuronale Ersatzmodelle für Axialflussmaschinen
 Abgleich mit Quellcode, Tests und Konfiguration: 28.10.2026
+Projektformatierung und zugehörige Prüfungen: 29.10.2026 (Abschnitt 13)
 
 Das Projekt erzeugt Maschinengeometrien und Betriebspunkte, berechnet sie mit
 Ansys Motor-CAD und schreibt Ergebnisse als CSV. PyTorch verarbeitet vollständige
@@ -649,3 +650,57 @@ und Umgebungsstand aufbewahren. Bundles ersetzen vollständige CSV-Quellen/Umgeb
 nicht. Alte Modelle, SQLite/Journals und Backups sind nicht allein wegen Alters
 überflüssig. Nach Herkunft und Wiederherstellbarkeit entscheiden; aktive Studien/
 Prozessdateien nicht ändern. Details stehen in docs/DATEIEN_UND_SPEICHERORTE.md.
+
+
+13. Codeformatierung und Lesereihenfolge
+---------------------------------------
+
+Die Python-Dateien unter src und tests werden einheitlich mit Ruff formatiert.
+pyproject.toml legt Python 3.14, 88 Zeichen als Zielzeilenlänge, vier Leerzeichen
+je Einrückungsebene und doppelte Anführungszeichen fest. Ruff setzt Umbrüche,
+Abstände und Leerzeilen; längere unverändert nötige Texte können über das Ziel
+hinausgehen. Zwischen Funktionen/Klassen auf Modulebene stehen zwei Leerzeilen,
+zwischen Methoden eine. Zusammengehörige Anweisungen bilden lesbare Absätze.
+
+Die Methoden in Pipeline, GUI, Training, Maschinengenerator und Simulation sind
+nach Zuständigkeit geordnet: Konstruktor und öffentliche Einstiegsmethoden zuerst,
+danach interne Abläufe und die zugehörigen Hilfsmethoden. Bestehende sinnvolle
+Funktionsgruppen bleiben erhalten. Dekoratoren bleiben bei ihren Methoden;
+Importreihenfolge, Datenfelder, Signaturen und Berechnungen bleiben unverändert.
+main_mcad_sim.py behält die bereits konfigurierte aktive Kombination (1, 10);
+die Beispiele (1, 20) und (1, 30) bleiben auskommentiert.
+
+Formatierung anwenden bzw. prüfen, jeweils aus der Projektwurzel:
+
+    python -m ruff format src tests
+    python -m ruff format --check src tests
+
+Prüfnachweis vom 29.10.2026, Umgebung Env_NN_AFM / Python 3.14.4:
+
+- 89 Python-Dateien erfasst; 29 Dateien durch Formatierung oder Methodensortierung
+  geändert. Ruff-Formatprüfung: 89 Dateien entsprechen dem Format.
+- Syntaxprüfung und AST-Vergleich gegen den Arbeitsstand vor der Formatierung
+  erfolgreich. Nur die ausdrücklich umgeordneten Methoden wurden für den Vergleich
+  nach Namen sortiert; ihre Inhalte und der übrige AST sind identisch.
+- Vollständiger Testlauf mit folgendem Befehl: 170 bestanden, ein Fehler im
+  parallelen Optuna-Journaltest durch OpenBLAS-Speicherzuweisung in Workerprozessen:
+
+    python -m pytest -q -p no:cacheprovider --basetemp .pytest_cache/formatting
+
+- Gezielte Wiederholung des betroffenen Tests mit begrenzter Threadzahl bestanden:
+
+    $env:OPENBLAS_NUM_THREADS = '1'
+    $env:OMP_NUM_THREADS = '1'
+    python -m pytest -q -p no:cacheprovider --basetemp .pytest_cache/formatting_retry tests/test_optuna_worker.py::test_workers_share_journal
+
+  Damit haben alle 171 Tests bestanden, verteilt auf Gesamtlauf und Wiederholung.
+  Beide Läufe meldeten eine SDK-DeprecationWarning zu alten Motor-CAD-Methodennamen.
+  PYTHONDONTWRITEBYTECODE=1 verhinderte bei den Läufen neue Bytecode-Dateien.
+- git diff --check erfolgreich. Kein realer Motor-CAD-, GUI- oder produktiver
+  Trainingslauf wurde gestartet; die Tests verwenden synthetische Daten.
+
+Die Formatierung ändert keine fachliche Funktionalität. Da Optimierungsfingerprints
+Quellcode-Hashes enthalten (Abschnitt 7), können formatierte Quelldateien dennoch
+neue Studienfingerprints erzeugen. Bestehende Daten und Studien wurden nicht
+migriert. Die früheren fachlichen Hinweise dieser README wurden im Rahmen dieser
+Formatierung nicht erneut vollständig abgeglichen.

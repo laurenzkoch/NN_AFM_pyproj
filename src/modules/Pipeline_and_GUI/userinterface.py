@@ -84,6 +84,9 @@ class MyUserInterface:
     ) -> None:
         self.root.destroy()
 
+    def run_ui(self) -> None:
+        self.root.mainloop()
+
     def update_ui(
         self,
         text: str,
@@ -111,9 +114,6 @@ class MyUserInterface:
                 text=(f"Files: {overall_value} from {self.overall_max_value}")
             )
             self.overall_progressbar["value"] = overall_value
-
-    def run_ui(self) -> None:
-        self.root.mainloop()
 
     def on_close(self) -> None:
         if self.close_requested:

@@ -60,20 +60,13 @@ def test_each_machine_uses_its_own_base_speed() -> None:
     frame = make_frame(machine_count=2)
     reconstructed = DataLoader._recalculate_data(frame)
 
-    first = reconstructed[
-        reconstructed["Stator_Bore"] == 70.0
-    ]
-    second = reconstructed[
-        reconstructed["Stator_Bore"] == 71.0
-    ]
+    first = reconstructed[reconstructed["Stator_Bore"] == 70.0]
+    second = reconstructed[reconstructed["Stator_Bore"] == 71.0]
 
     assert first["BaseSpeedRPM"].nunique() == 1
     assert second["BaseSpeedRPM"].nunique() == 1
 
-    assert (
-        first["BaseSpeedRPM"].iloc[0]
-        != second["BaseSpeedRPM"].iloc[0]
-    )
+    assert first["BaseSpeedRPM"].iloc[0] != second["BaseSpeedRPM"].iloc[0]
 
     np.testing.assert_allclose(
         first[AXIS_LIST[0]].to_numpy(),

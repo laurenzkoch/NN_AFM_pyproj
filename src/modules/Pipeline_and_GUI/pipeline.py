@@ -53,17 +53,22 @@ class MyPipeline:
         self.service_thread: Thread | None = None
         self.service_exception: BaseException | None = None
 
-    def _close_queues(self) -> None:
-        if self._queues_closed:
+    def request_cancel(self) -> None:
+        if self.cancellation.is_requested():
             return
 
-        self.progress_queue.cancel_join_thread()
-        self.progress_queue.close()
+        self.cancellation.request()
+        logger.info("Cancellation requested for pipeline: %s", self.service_name)
 
-        self.log_queue.close()
-        self.log_queue.join_thread()
+    def _claim_run(self) -> None:
+        with self._start_lock:
+            if self._used:
+                raise RuntimeError(
+                    "This pipeline instance has already been used. "
+                    "Create a new instance for another run."
+                )
 
-        self._queues_closed = True
+            self._used = True
 
     def _run_pipeline(self) -> None:
         root_logger = logging.getLogger()
@@ -98,6 +103,20 @@ class MyPipeline:
                         root_logger.handlers[:] = saved_handlers
                         root_logger.setLevel(saved_level)
                         self._close_queues()
+
+    def _initialize_ui(self, title: str) -> MyUserInterface:
+        return MyUserInterface(
+            max_value=self.max_progress_steps,
+            title=title,
+            overall_max_value=self.overall_max_value,
+            on_cancel=self.request_cancel,
+        )
+
+    def _initialize_service_thread(self) -> Thread:
+        return Thread(
+            target=self._run_service,
+            daemon=False,
+        )
 
     def _run_service(self) -> None:
         self.progress_queue.put(
@@ -136,27 +155,6 @@ class MyPipeline:
                     text=f"{self.service_name} completed",
                 )
             )
-
-    def _initialize_service_thread(self) -> Thread:
-        return Thread(
-            target=self._run_service,
-            daemon=False,
-        )
-
-    def request_cancel(self) -> None:
-        if self.cancellation.is_requested():
-            return
-
-        self.cancellation.request()
-        logger.info("Cancellation requested for pipeline: %s", self.service_name)
-
-    def _initialize_ui(self, title: str) -> MyUserInterface:
-        return MyUserInterface(
-            max_value=self.max_progress_steps,
-            title=title,
-            overall_max_value=self.overall_max_value,
-            on_cancel=self.request_cancel,
-        )
 
     def _wait_for_thread(self) -> None:
         thread = self.service_thread
@@ -212,12 +210,14 @@ class MyPipeline:
 
         ui.root.after(100, self._poll_queue)
 
-    def _claim_run(self) -> None:
-        with self._start_lock:
-            if self._used:
-                raise RuntimeError(
-                    "This pipeline instance has already been used. "
-                    "Create a new instance for another run."
-                )
+    def _close_queues(self) -> None:
+        if self._queues_closed:
+            return
 
-            self._used = True
+        self.progress_queue.cancel_join_thread()
+        self.progress_queue.close()
+
+        self.log_queue.close()
+        self.log_queue.join_thread()
+
+        self._queues_closed = True

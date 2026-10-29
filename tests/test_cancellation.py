@@ -25,11 +25,7 @@ from src.modules.Pipeline_and_GUI.events import PipelineEvent
 from src.modules.simulation import simulation as simulations
 from src.modules.simulation.reference_run import ReferenceRunResult
 
-type WorkerResult = (
-    tuple[list[float] | None, bool]
-    | ReferenceRunResult
-    | None
-)
+type WorkerResult = tuple[list[float] | None, bool] | ReferenceRunResult | None
 
 type WorkerFuture = Future[WorkerResult]
 
@@ -81,10 +77,10 @@ def test_simulation_cancellation_kills_pool_and_stops_batches(
 
         @staticmethod
         def submit(
-                function: object,
-                _parameters: dict[str, float],
-                *,
-                log_context: str = "",
+            function: object,
+            _parameters: dict[str, float],
+            *,
+            log_context: str = "",
         ) -> WorkerFuture:
 
             assert "batch=" in log_context
@@ -97,22 +93,15 @@ def test_simulation_cancellation_kills_pool_and_stops_batches(
             )
 
             true_for_reference_run = (
-                    function is simulations._execute_reference_simulation
+                function is simulations._execute_reference_simulation
             )
 
             future: WorkerFuture = Future()
 
-            stage = (
-                "reference"
-                if true_for_reference_run
-                else "load"
-            )
+            stage = "reference" if true_for_reference_run else "load"
             submitted_stages.append(stage)
 
-            if (
-                true_for_reference_run
-                and cancel_stage == "load"
-            ):
+            if true_for_reference_run and cancel_stage == "load":
                 # Let the reference finish so the test reaches
                 # the wait for the load calculation.
                 future.set_result(
@@ -146,11 +135,7 @@ def test_simulation_cancellation_kills_pool_and_stops_batches(
 
         future_set = set(futures)
 
-        completed = {
-            future
-            for future in future_set
-            if future.done()
-        }
+        completed = {future for future in future_set if future.done()}
 
         if completed:
             return completed, future_set - completed
@@ -172,8 +157,7 @@ def test_simulation_cancellation_kills_pool_and_stops_batches(
     progress, logs = event_queues
 
     geometries: Generator[dict[str, float]] = (
-        {"Stator_Bore": value}
-        for value in (70.0, 71.0)
+        {"Stator_Bore": value} for value in (70.0, 71.0)
     )
 
     instance = simulations.MCADSimulation(
@@ -198,18 +182,12 @@ def test_simulation_cancellation_kills_pool_and_stops_batches(
     ]
 
     expected_stages = (
-        ["reference"]
-        if cancel_stage == "reference"
-        else ["reference", "load"]
+        ["reference"] if cancel_stage == "reference" else ["reference", "load"]
     )
 
     assert submitted_stages == expected_stages
 
-    unfinished = [
-        future
-        for future in submitted
-        if not future.done()
-    ]
+    unfinished = [future for future in submitted if not future.done()]
 
     assert len(unfinished) == 1
     assert instance.dataframes == {}
@@ -302,6 +280,7 @@ def test_optimizer_cancellation_cleans_up_all_started_workers(
     assert all(process.closed for process in created)
     assert optimizer.channel_result is None
 
+
 def test_requested_cancellation_prevents_pool_creation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -333,10 +312,7 @@ def test_requested_cancellation_prevents_pool_creation(
     progress, logs = event_queues
 
     instance = simulations.MCADSimulation(
-        geometry_generator=(
-            {"Stator_Bore": value}
-            for value in (70.0, 71.0)
-        ),
+        geometry_generator=({"Stator_Bore": value} for value in (70.0, 71.0)),
         operating_map=np.array([[0.5, 3.0, -4.0]]),
         batch_size=1,
         progress_queue=progress,

@@ -60,9 +60,7 @@ def test_parameter_communication_error_preserves_cause(
     )
     processor.mcad_process.set_variable.side_effect = original
 
-    with pytest.raises(
-        errors.MCADCommunicationError
-    ) as captured:
+    with pytest.raises(errors.MCADCommunicationError) as captured:
         processor.set_value_in_mcad(
             "Tooth_Tip_Depth",
             1.8,
@@ -84,9 +82,7 @@ def test_result_communication_error_preserves_cause(
     )
     processor.mcad_process.get_variable.side_effect = original
 
-    with pytest.raises(
-        errors.MCADCommunicationError
-    ) as captured:
+    with pytest.raises(errors.MCADCommunicationError) as captured:
         processor.get_value_from_mcad("Ke_Fundamental")
 
     assert captured.value.__cause__ is original
@@ -131,9 +127,7 @@ def test_calculation_errors_are_not_converted_to_false(
     expected_type: type[errors.MCADExecutionError],
 ) -> None:
     original = processing.pymotorcad.MotorCADError(message)
-    processor.mcad_process.do_magnetic_calculation.side_effect = (
-        original
-    )
+    processor.mcad_process.do_magnetic_calculation.side_effect = original
 
     with pytest.raises(expected_type) as captured:
         processor.do_calculation()
@@ -147,8 +141,7 @@ def test_close_attempt_is_not_repeated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "src.modules.process.motor_cad_processes."
-        "mcad_processing.time.sleep",
+        "src.modules.process.motor_cad_processes.mcad_processing.time.sleep",
         lambda _seconds: None,
     )
 
@@ -164,14 +157,11 @@ def test_shutdown_discards_instance_even_when_close_fails(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setattr(
-        "src.modules.process.motor_cad_processes."
-        "mcad_instance_handling._mcad_instance",
+        "src.modules.process.motor_cad_processes.mcad_instance_handling._mcad_instance",
         processor,
     )
 
-    close = Mock(
-        side_effect=errors.MCADCleanupError("quit failed")
-    )
+    close = Mock(side_effect=errors.MCADCleanupError("quit failed"))
     monkeypatch.setattr(processor, "close", close)
 
     instances.shutdown_mcad_instance()
@@ -191,8 +181,7 @@ def test_strict_shutdown_reports_cleanup_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "src.modules.process.motor_cad_processes."
-        "mcad_instance_handling._mcad_instance",
+        "src.modules.process.motor_cad_processes.mcad_instance_handling._mcad_instance",
         processor,
     )
 
@@ -217,29 +206,22 @@ def test_worker_cleanup_failure_preserves_original_error(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     processor = Mock()
-    original = errors.MCADCommunicationError(
-        "connection lost"
-    )
+    original = errors.MCADCommunicationError("connection lost")
     processor.execute_mcad_simulation.side_effect = original
 
     monkeypatch.setattr(
-        "src.modules.simulation.simulation."
-        "mcad_instance_handling.get_mcad_instance",
+        "src.modules.simulation.simulation.mcad_instance_handling.get_mcad_instance",
         lambda: processor,
     )
 
-    cleanup = Mock(
-        side_effect=errors.MCADCleanupError("quit failed")
-    )
+    cleanup = Mock(side_effect=errors.MCADCleanupError("quit failed"))
     monkeypatch.setattr(
         "src.modules.simulation.simulation."
         "mcad_instance_handling.shutdown_mcad_instance",
         cleanup,
     )
 
-    with pytest.raises(
-        errors.MCADCommunicationError
-    ) as captured:
+    with pytest.raises(errors.MCADCommunicationError) as captured:
         simulations._execute_simulation(
             {},
             log_context="batch=b1 geometry=g1 task=t1",
@@ -257,9 +239,7 @@ def test_pool_cleanup_failure_does_not_escape(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     pool = Mock()
-    pool.kill_workers.side_effect = RuntimeError(
-        "termination failed"
-    )
+    pool.kill_workers.side_effect = RuntimeError("termination failed")
 
     simulations.MCADSimulation._stop_pool_after_error(
         pool,
@@ -270,17 +250,15 @@ def test_pool_cleanup_failure_does_not_escape(
     assert "Process pool termination failed" in caplog.text
     assert "batch=b1" in caplog.text
 
+
 def test_instance_creation_failure_is_logged_and_propagated(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    original = errors.MCADInitializationError(
-        "instance creation failed"
-    )
+    original = errors.MCADInitializationError("instance creation failed")
 
     monkeypatch.setattr(
-        "src.modules.process.motor_cad_processes."
-        "mcad_instance_handling._mcad_instance",
+        "src.modules.process.motor_cad_processes.mcad_instance_handling._mcad_instance",
         None,
     )
     monkeypatch.setattr(
@@ -294,19 +272,15 @@ def test_instance_creation_failure_is_logged_and_propagated(
         Mock(),
     )
     monkeypatch.setattr(
-        "src.modules.process.motor_cad_processes."
-        "mcad_instance_handling.Finalize",
+        "src.modules.process.motor_cad_processes.mcad_instance_handling.Finalize",
         Mock(),
     )
     monkeypatch.setattr(
-        "src.modules.process.motor_cad_processes."
-        "mcad_instance_handling.MCADProcessor",
+        "src.modules.process.motor_cad_processes.mcad_instance_handling.MCADProcessor",
         Mock(side_effect=original),
     )
 
-    with pytest.raises(
-        errors.MCADInitializationError
-    ) as captured:
+    with pytest.raises(errors.MCADInitializationError) as captured:
         instances.init_mcad_instance(Mock())
 
     assert captured.value is original

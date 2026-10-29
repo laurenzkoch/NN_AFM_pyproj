@@ -64,8 +64,7 @@ def init_mcad_instance(
 
     except BaseException:
         logger.exception(
-            "Worker initialization failed: "
-            "phase=%s elapsed_s=%.3f",
+            "Worker initialization failed: phase=%s elapsed_s=%.3f",
             phase,
             perf_counter() - started,
         )
@@ -97,9 +96,7 @@ def shutdown_mcad_instance(
     _mcad_instance = None
 
     if instance is None:
-        logger.debug(
-            "No registered Motor-CAD instance to close."
-        )
+        logger.debug("No registered Motor-CAD instance to close.")
         return
 
     started = perf_counter()

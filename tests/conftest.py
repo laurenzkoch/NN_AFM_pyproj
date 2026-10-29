@@ -88,9 +88,7 @@ def metadata() -> SimulationMetadata:
         "external_dependency_hashes": {},
         "csv_columns": list(CSV_PARAMETERS),
         "float_decimal_places": CSV_DECIMAL_PLACES,
-        "speed_normalization": (
-            "shaft_speed_rpm / base_speed_rpm"
-        ),
+        "speed_normalization": ("shaft_speed_rpm / base_speed_rpm"),
         "reference_speed_rpm": REFERENCE_SPEED_RPM,
         "reference_current_a": 0.0,
         "back_emf_constant_definition": (
@@ -139,12 +137,7 @@ def make_frame(
         dc_bus_voltage_v = 800.0
         reference_ke = 2.0 + machine * 0.01
 
-        base_speed_rpm = (
-            dc_bus_voltage_v
-            / reference_ke
-            * 60.0
-            / math.tau
-        )
+        base_speed_rpm = dc_bus_voltage_v / reference_ke * 60.0 / math.tau
 
         for speed_norm in axes[AXIS_LIST[0]]:
             for q_density in axes[AXIS_LIST[1]]:
@@ -157,9 +150,7 @@ def make_frame(
                     # Synthetic conductor area: 1 mm².
                     # RMS phase currents therefore numerically equal
                     # the corresponding RMS current densities.
-                    peak_current = (
-                        math.sqrt(2.0) * current_density
-                    )
+                    peak_current = math.sqrt(2.0) * current_density
 
                     row = {
                         name: float(DEFAULT_VALUES.get(name, 1.0))
@@ -174,14 +165,10 @@ def make_frame(
                             "DCBusVoltage": dc_bus_voltage_v,
                             "ReferenceSpeedRPM": REFERENCE_SPEED_RPM,
                             "ReferenceKeFundamental": reference_ke,
-                            "ReferencePeakBackEMFPhase": (
-                                100.0 + machine
-                            ),
+                            "ReferencePeakBackEMFPhase": (100.0 + machine),
                             "BaseSpeedRPM": base_speed_rpm,
                             "ShaftSpeedNorm": float(speed_norm),
-                            "ShaftSpeed": (
-                                float(speed_norm) * base_speed_rpm
-                            ),
+                            "ShaftSpeed": (float(speed_norm) * base_speed_rpm),
                             "PeakCurrent": peak_current,
                             "RMSCurrentDensity": current_density,
                             "RMSPhaseCurrent_D": float(d_density),
@@ -197,14 +184,8 @@ def make_frame(
 
                     point_index = len(rows) % points_per_map
 
-                    for channel, name in enumerate(
-                        OUTPUT_NEURON_LIST
-                    ):
-                        row[name] = (
-                            machine * 100.0
-                            + point_index
-                            + channel
-                        )
+                    for channel, name in enumerate(OUTPUT_NEURON_LIST):
+                        row[name] = machine * 100.0 + point_index + channel
 
                     rows.append(row)
 

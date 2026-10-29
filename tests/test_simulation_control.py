@@ -195,6 +195,7 @@ def test_combinations_run_sequentially_and_reset_both_progress_levels(
     finally:
         pipeline._close_queues()
 
+
 def test_failed_future_propagates_and_reports_no_success(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

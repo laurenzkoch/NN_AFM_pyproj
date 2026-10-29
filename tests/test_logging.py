@@ -72,13 +72,11 @@ def test_all_phases_and_worker_use_exactly_one_file(
             "WORKER_INFO_TEST",
             "WORKER_ERROR_TEST",
             "AFTER_PIPELINE_TEST",
-            "WORKER_DEBUG_TEST"
+            "WORKER_DEBUG_TEST",
         ):
             assert content.count(marker) == 1
         debug_line = next(
-            line
-            for line in content.splitlines()
-            if "WORKER_DEBUG_TEST" in line
+            line for line in content.splitlines() if "WORKER_DEBUG_TEST" in line
         )
 
         assert worker_pid != os.getpid()

@@ -52,8 +52,7 @@ def map_generator(
     for axis_index, size in enumerate(map_size):
         if size > 1 and bounds[axis_index, 0] == bounds[axis_index, 1]:
             raise ValueError(
-                f"Axis {axis_index} needs distinct bounds "
-                "when its size exceeds one."
+                f"Axis {axis_index} needs distinct bounds when its size exceeds one."
             )
 
     axes = [

@@ -17,9 +17,7 @@ def main() -> None:
     total_geometries = 0
 
     for num_base_designs, num_lam_designs in combinations:
-        expected_geometries = (
-            num_base_designs * num_lam_designs
-        )
+        expected_geometries = num_base_designs * num_lam_designs
         total_geometries += expected_geometries
 
         generator = AFMMachineGenerator(

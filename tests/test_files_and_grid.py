@@ -100,6 +100,7 @@ def test_worker_count_is_limited_to_available_cpus(
     with pytest.raises(TypeError):
         resources.determine_number_of_kernels(True)
 
+
 @pytest.mark.parametrize(
     "bounds",
     [

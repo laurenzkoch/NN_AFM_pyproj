@@ -50,10 +50,7 @@ def test_generated_geometries_contain_no_operating_points() -> None:
         assert required_geometry_parameters <= geometry.keys()
         assert operating_parameters.isdisjoint(geometry)
 
-        assert all(
-            math.isfinite(value)
-            for value in geometry.values()
-        )
+        assert all(math.isfinite(value) for value in geometry.values())
 
 
 def test_geometry_sampling_is_reproducible() -> None:
@@ -66,9 +63,7 @@ def test_geometry_sampling_is_reproducible() -> None:
         num_lam_designs=3,
     )
 
-    assert list(
-        first.get_generator(_type="v2")
-    ) == list(
+    assert list(first.get_generator(_type="v2")) == list(
         second.get_generator(_type="v2")
     )
 

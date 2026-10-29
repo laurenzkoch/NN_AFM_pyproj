@@ -117,6 +117,17 @@ class NNTrainer:
 
         return trained_network
 
+    def _training_process(self) -> MLP | Conv3dAutoencoder:
+        for epoch in range(self.num_epochs):
+            self._train()
+            validation_loss = self._validation()
+            if self._early_stopping(validation_loss):
+                break
+        if self.best_model_state is not None:
+            self.neuronal_network.load_state_dict(self.best_model_state)
+
+        return self.neuronal_network
+
     def _move_to_device(
         self,
         an_object: torch.nn.Module | None,
@@ -130,44 +141,14 @@ class NNTrainer:
             for parameter in self.trained_autoencoder.parameters():
                 parameter.requires_grad = False
 
-    def _get_small_map(self, map_prediction: torch.Tensor) -> torch.Tensor:
-        if map_prediction.ndim != 5:
-            raise ValueError(f"Expected 5D tensor, got shape {map_prediction.shape}")
-        map_shape = tuple(map_prediction.shape[1:-1])
+    def _train(self) -> None:
+        self.neuronal_network.train()
+        self._calc_loss(true_for_training=True)
 
-        indices = []
-        for axis_size in map_shape:
-            middle_index = (axis_size - 1) // 2
-            indices.append([0, middle_index, axis_size - 1])
-
-        sparse_indices = torch.tensor(
-            indices, dtype=torch.long, device=self.torch_device
-        )
-
-        small_map_pred = (
-            map_prediction.index_select(1, sparse_indices[0])
-            .index_select(2, sparse_indices[1])
-            .index_select(3, sparse_indices[2])
-        )
-
-        return small_map_pred
-
-    def _checked_mse(
-        self,
-        target: torch.Tensor,
-        prediction: torch.Tensor,
-    ) -> torch.Tensor:
-        if target.shape != prediction.shape:
-            raise ValueError(
-                "Prediction and target shapes must match: "
-                f"map_prediction_validation={tuple(prediction.shape)}, "
-                f"target={tuple(target.shape)}."
-            )
-
-        if target.numel() == 0:
-            raise ValueError("Cannot calculate loss for empty tensors.")
-
-        return self.criterion(prediction, target)
+    @torch.no_grad()
+    def _validation(self) -> float:
+        self.neuronal_network.eval()
+        return self._calc_loss(true_for_training=False)
 
     def _calc_loss(self, true_for_training: bool) -> float:
         optimizer: torch.optim.Optimizer | None = self.optimizer
@@ -231,14 +212,44 @@ class NNTrainer:
 
         return loss.item()
 
-    def _train(self) -> None:
-        self.neuronal_network.train()
-        self._calc_loss(true_for_training=True)
+    def _get_small_map(self, map_prediction: torch.Tensor) -> torch.Tensor:
+        if map_prediction.ndim != 5:
+            raise ValueError(f"Expected 5D tensor, got shape {map_prediction.shape}")
+        map_shape = tuple(map_prediction.shape[1:-1])
 
-    @torch.no_grad()
-    def _validation(self) -> float:
-        self.neuronal_network.eval()
-        return self._calc_loss(true_for_training=False)
+        indices = []
+        for axis_size in map_shape:
+            middle_index = (axis_size - 1) // 2
+            indices.append([0, middle_index, axis_size - 1])
+
+        sparse_indices = torch.tensor(
+            indices, dtype=torch.long, device=self.torch_device
+        )
+
+        small_map_pred = (
+            map_prediction.index_select(1, sparse_indices[0])
+            .index_select(2, sparse_indices[1])
+            .index_select(3, sparse_indices[2])
+        )
+
+        return small_map_pred
+
+    def _checked_mse(
+        self,
+        target: torch.Tensor,
+        prediction: torch.Tensor,
+    ) -> torch.Tensor:
+        if target.shape != prediction.shape:
+            raise ValueError(
+                "Prediction and target shapes must match: "
+                f"map_prediction_validation={tuple(prediction.shape)}, "
+                f"target={tuple(target.shape)}."
+            )
+
+        if target.numel() == 0:
+            raise ValueError("Cannot calculate loss for empty tensors.")
+
+        return self.criterion(prediction, target)
 
     def _early_stopping(self, validation_loss: float) -> bool:
         if validation_loss < self.best_validation_loss - 1e-6:
@@ -252,14 +263,3 @@ class NNTrainer:
             return True
         else:
             return False
-
-    def _training_process(self) -> MLP | Conv3dAutoencoder:
-        for epoch in range(self.num_epochs):
-            self._train()
-            validation_loss = self._validation()
-            if self._early_stopping(validation_loss):
-                break
-        if self.best_model_state is not None:
-            self.neuronal_network.load_state_dict(self.best_model_state)
-
-        return self.neuronal_network

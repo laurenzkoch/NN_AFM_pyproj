@@ -100,16 +100,10 @@ def test_current_density_grid_corrects_csv_rounding(
         index=[42],
     )
 
-    conductor_area = df["PeakCurrent"] / (
-        np.sqrt(2.0) * df["RMSCurrentDensity"]
-    )
+    conductor_area = df["PeakCurrent"] / (np.sqrt(2.0) * df["RMSCurrentDensity"])
 
-    df[AXIS_LIST[1]] = (
-        df["RMSPhaseCurrent_Q"] / conductor_area
-    )
-    df[AXIS_LIST[2]] = (
-        df["RMSPhaseCurrent_D"] / conductor_area
-    )
+    df[AXIS_LIST[1]] = df["RMSPhaseCurrent_Q"] / conductor_area
+    df[AXIS_LIST[2]] = df["RMSPhaseCurrent_D"] / conductor_area
 
     result = loader._align_current_density_grid(df)
 

@@ -30,13 +30,13 @@ class _LegacyLatinHypercubeFactory(Protocol):
 
 class AFMMachineGenerator:
     def __init__(
-            self,
-            num_base_designs: int,
-            num_lam_designs: int,
+        self,
+        num_base_designs: int,
+        num_lam_designs: int,
     ) -> None:
         for name, value in (
-                ("num_base_designs", num_base_designs),
-                ("num_lam_designs", num_lam_designs),
+            ("num_base_designs", num_base_designs),
+            ("num_lam_designs", num_lam_designs),
         ):
             if type(value) is not int or value < 1:
                 raise ValueError(f"{name} must be a positive integer.")
@@ -53,27 +53,28 @@ class AFMMachineGenerator:
             case _:
                 raise ValueError(f"Unknown generator type: {_type}")
 
-    @staticmethod
-    def _sampling(
-        num_of_points: int,
-        d: int,
-        lower_bounds: np.ndarray,
-        upper_bounds: np.ndarray,
-        seed: int,
-    ) -> np.ndarray:
-        factory: _LegacyLatinHypercubeFactory = cast(
-            _LegacyLatinHypercubeFactory,
-            cast(object, qmc.LatinHypercube),
-        )
+    def _lambda_generator_v2(self) -> Generator[dict[str, float]]:
+        lambda_sets = self._get_lambda_values_v2()
+        base_samples = self._get_base_samples()
 
-        sampler: qmc.LatinHypercube = factory(
-            d=d,
-            optimization="random-cd",
-            seed=seed,
-        )
-        samples: NDArray[np.float64] = sampler.random(n=num_of_points)
+        for airgap_sample, stator_bore_sample in base_samples:
+            for lambda_set in lambda_sets:
+                yield geometry_from_lambdas(
+                    lambda_set,
+                    airgap=float(airgap_sample),
+                    stator_bore=float(stator_bore_sample),
+                    slot_number=SLOT_NUMBER,
+                    pole_number=POLE_NUMBER,
+                )
 
-        return qmc.scale(samples, lower_bounds, upper_bounds)
+    def _get_base_samples(self) -> NDArray[np.float64]:
+        return self._sampling(
+            num_of_points=self.num_base_designs,
+            d=2,
+            lower_bounds=np.array([AIRGAP[0], STATOR_BORE[0]]),
+            upper_bounds=np.array([AIRGAP[1], STATOR_BORE[1]]),
+            seed=17,
+        )
 
     def _get_lambda_values_v2(self) -> tuple[LambdaValues, ...]:
         columns: list[str] = LambdaValues.columns()
@@ -114,25 +115,24 @@ class AFMMachineGenerator:
 
         return tuple(LambdaValues.from_array(sample) for sample in samples)
 
-    def _get_base_samples(self) -> NDArray[np.float64]:
-        return self._sampling(
-            num_of_points=self.num_base_designs,
-            d=2,
-            lower_bounds=np.array([AIRGAP[0], STATOR_BORE[0]]),
-            upper_bounds=np.array([AIRGAP[1], STATOR_BORE[1]]),
-            seed=17,
+    @staticmethod
+    def _sampling(
+        num_of_points: int,
+        d: int,
+        lower_bounds: np.ndarray,
+        upper_bounds: np.ndarray,
+        seed: int,
+    ) -> np.ndarray:
+        factory: _LegacyLatinHypercubeFactory = cast(
+            _LegacyLatinHypercubeFactory,
+            cast(object, qmc.LatinHypercube),
         )
 
-    def _lambda_generator_v2(self) -> Generator[dict[str, float]]:
-        lambda_sets = self._get_lambda_values_v2()
-        base_samples = self._get_base_samples()
+        sampler: qmc.LatinHypercube = factory(
+            d=d,
+            optimization="random-cd",
+            seed=seed,
+        )
+        samples: NDArray[np.float64] = sampler.random(n=num_of_points)
 
-        for airgap_sample, stator_bore_sample in base_samples:
-            for lambda_set in lambda_sets:
-                yield geometry_from_lambdas(
-                    lambda_set,
-                    airgap=float(airgap_sample),
-                    stator_bore=float(stator_bore_sample),
-                    slot_number=SLOT_NUMBER,
-                    pole_number=POLE_NUMBER,
-                )
+        return qmc.scale(samples, lower_bounds, upper_bounds)

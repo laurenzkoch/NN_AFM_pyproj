@@ -251,7 +251,6 @@ class DataLoader:
         )
 
         for geometry_key, positions in groups.indices.items():
-
             if not isinstance(geometry_key, tuple):
                 raise TypeError("Expected a tuple as geometry grouping key.")
 
@@ -287,9 +286,7 @@ class DataLoader:
             if bool((df[column] <= 0).any()):
                 raise ValueError(f"'{column}' must be strictly positive.")
 
-        conductor_area = df["PeakCurrent"] / (
-                np.sqrt(2) * df["RMSCurrentDensity"]
-        )
+        conductor_area = df["PeakCurrent"] / (np.sqrt(2) * df["RMSCurrentDensity"])
 
         positive_reference_columns = (
             "DCBusVoltage",
@@ -307,17 +304,14 @@ class DataLoader:
             raise ValueError("'ShaftSpeed' must not be negative.")
 
         expected_base_speed = (
-                df["DCBusVoltage"]
-                / df["ReferenceKeFundamental"]
-                * 60.0
-                / math.tau
+            df["DCBusVoltage"] / df["ReferenceKeFundamental"] * 60.0 / math.tau
         )
 
         if not np.allclose(
-                df["BaseSpeedRPM"],
-                expected_base_speed,
-                rtol=1e-8,
-                atol=1e-8,
+            df["BaseSpeedRPM"],
+            expected_base_speed,
+            rtol=1e-8,
+            atol=1e-8,
         ):
             raise ValueError(
                 "BaseSpeedRPM is inconsistent with voltage and reference Ke."
@@ -326,10 +320,10 @@ class DataLoader:
         df[AXIS_LIST[0]] = df["ShaftSpeed"] / df["BaseSpeedRPM"]
 
         if not np.allclose(
-                df[AXIS_LIST[0]],
-                df["ShaftSpeedNorm"],
-                rtol=1e-8,
-                atol=1e-9,
+            df[AXIS_LIST[0]],
+            df["ShaftSpeedNorm"],
+            rtol=1e-8,
+            atol=1e-9,
         ):
             raise ValueError(
                 "Stored normalized speed disagrees with reconstructed speed."
@@ -390,17 +384,12 @@ class DataLoader:
         base_speed = df["BaseSpeedRPM"].to_numpy(dtype=np.float64)
 
         if bool((base_speed <= half_resolution).any()):
-            raise ValueError(
-                "Base speed is too small for speed-grid alignment."
-            )
+            raise ValueError("Base speed is too small for speed-grid alignment.")
 
         speed_bounds = speed[:, None] + offsets
         base_speed_bounds = base_speed[:, None] + offsets
 
-        possible_values = (
-                speed_bounds[:, :, None]
-                / base_speed_bounds[:, None, :]
-        )
+        possible_values = speed_bounds[:, :, None] / base_speed_bounds[:, None, :]
 
         self._align_axis_grid(
             df=df,

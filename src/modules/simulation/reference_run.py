@@ -33,9 +33,7 @@ class ReferenceRunResult:
 
         for name, value in values.items():
             if not math.isfinite(value) or value <= 0:
-                raise ValueError(
-                    f"{name} must be finite and positive; got {value!r}."
-                )
+                raise ValueError(f"{name} must be finite and positive; got {value!r}.")
 
     def calculate_base_speed_rpm(self, dc_bus_voltage_v: float) -> float:
         """Return the no-load voltage-limit speed for ideal linear SVPWM."""
@@ -54,8 +52,7 @@ class ReferenceRunResult:
 
         if not math.isfinite(speed_rpm) or speed_rpm <= 0:
             raise ValueError(
-                "Calculated base speed must be finite and positive; "
-                f"got {speed_rpm!r}."
+                f"Calculated base speed must be finite and positive; got {speed_rpm!r}."
             )
 
         return speed_rpm

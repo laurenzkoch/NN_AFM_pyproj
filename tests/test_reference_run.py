@@ -19,13 +19,9 @@ def test_base_speed_uses_mechanical_angular_speed() -> None:
 
     # 800 V / (2 V*s/rad) = 400 rad/s.
     # Converted to rpm: approximately 3819.718634.
-    assert reference.calculate_base_speed_rpm(
-        800.0
-    ) == pytest.approx(3819.718634205488)
+    assert reference.calculate_base_speed_rpm(800.0) == pytest.approx(3819.718634205488)
 
-    assert reference.calculate_base_speed_rpm(
-        400.0
-    ) == pytest.approx(1909.859317102744)
+    assert reference.calculate_base_speed_rpm(400.0) == pytest.approx(1909.859317102744)
 
 
 @pytest.mark.parametrize(
@@ -144,10 +140,7 @@ def test_reference_run_uses_zero_current_and_restores_settings(
 
     assert values == previous_values
 
-    queried_names = {
-        call.args[0]
-        for call in api.get_variable.call_args_list
-    }
+    queried_names = {call.args[0] for call in api.get_variable.call_args_list}
 
     assert "Ke_Fundamental" in queried_names
     assert "PeakBackEMFPhase" in queried_names

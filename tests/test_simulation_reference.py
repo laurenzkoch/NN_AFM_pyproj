@@ -19,6 +19,7 @@ class PoolSettings(TypedDict):
     failed_reference: bool
     error_stage: str | None
 
+
 @pytest.fixture
 def simulation_factory(
     tmp_path,
@@ -38,10 +39,7 @@ def simulation_factory(
     progress, logs = event_queues
 
     def create(geometry_count=1):
-        geometries = (
-            {"Stator_Bore": 70.0 + index}
-            for index in range(geometry_count)
-        )
+        geometries = ({"Stator_Bore": 70.0 + index} for index in range(geometry_count))
 
         return simulations.MCADSimulation(
             geometry_generator=geometries,
@@ -89,10 +87,10 @@ def pool_double(monkeypatch):
         pool = Mock()
 
         def submit(
-                function,
-                parameters,
-                *,
-                log_context: str = "",
+            function,
+            parameters,
+            *,
+            log_context: str = "",
         ):
             assert "batch=" in log_context
             assert "geometry=" in log_context
@@ -103,25 +101,17 @@ def pool_double(monkeypatch):
             )
 
             true_for_reference_run = (
-                    function is simulations._execute_reference_simulation
+                function is simulations._execute_reference_simulation
             )
 
-            stage = (
-                "reference"
-                if true_for_reference_run
-                else "load"
-            )
+            stage = "reference" if true_for_reference_run else "load"
 
-            submissions.append(
-                (pool_id, stage, dict(parameters))
-            )
+            submissions.append((pool_id, stage, dict(parameters)))
 
             future = Future()
 
             if settings["error_stage"] == stage:
-                future.set_exception(
-                    RuntimeError(f"{stage} failure")
-                )
+                future.set_exception(RuntimeError(f"{stage} failure"))
             elif true_for_reference_run:
                 if settings["failed_reference"]:
                     future.set_result(None)
@@ -141,10 +131,7 @@ def pool_double(monkeypatch):
                     **parameters,
                 }
 
-                row = [
-                    values[name]
-                    for name in MCAD_RESULT_PARAMETERS
-                ]
+                row = [values[name] for name in MCAD_RESULT_PARAMETERS]
 
                 future.set_result((row, True))
 
@@ -192,23 +179,17 @@ def test_pool_restarts_after_each_geometry_batch(
     ]
 
     reference_pool_ids = [
-        pool_id
-        for pool_id, stage, _parameters in submissions
-        if stage == "reference"
+        pool_id for pool_id, stage, _parameters in submissions if stage == "reference"
     ]
 
     load_pool_ids = [
-        pool_id
-        for pool_id, stage, _parameters in submissions
-        if stage == "load"
+        pool_id for pool_id, stage, _parameters in submissions if stage == "load"
     ]
 
     assert reference_pool_ids == [0, 0, 1, 1, 2]
     assert load_pool_ids == [0] * 4 + [1] * 4 + [2] * 2
 
-    assert [stage for _, stage, _ in submissions] == (
-        ["reference", "load", "load"] * 5
-    )
+    assert [stage for _, stage, _ in submissions] == (["reference", "load", "load"] * 5)
 
     frame = import_data_from_csv(instance.csv_path)
 
@@ -216,11 +197,16 @@ def test_pool_restarts_after_each_geometry_batch(
     assert len(frame) == 10
 
     assert frame["ReferenceKeFundamental"].tolist() == [
-        2.0, 2.0,
-        3.0, 3.0,
-        4.0, 4.0,
-        5.0, 5.0,
-        6.0, 6.0,
+        2.0,
+        2.0,
+        3.0,
+        3.0,
+        4.0,
+        4.0,
+        5.0,
+        5.0,
+        6.0,
+        6.0,
     ]
 
     np.testing.assert_allclose(
@@ -284,9 +270,9 @@ def test_worker_error_kills_pool_and_stops_further_work(
     ]
 
     # No subsequent geometry or replacement pool may start.
-    assert sum(
-        submission_stage == "reference"
-        for _, submission_stage, _ in submissions
-    ) == 1
+    assert (
+        sum(submission_stage == "reference" for _, submission_stage, _ in submissions)
+        == 1
+    )
 
     assert import_data_from_csv(instance.csv_path).empty

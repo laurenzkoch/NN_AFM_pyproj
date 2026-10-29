@@ -60,6 +60,7 @@ def _copy_simulation_payload(
 ) -> SimulationPayload:
     return deepcopy(payload)
 
+
 def is_compatible_metadata(
     actual: SimulationMetadata,
     expected: SimulationMetadata,

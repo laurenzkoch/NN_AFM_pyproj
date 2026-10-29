@@ -163,6 +163,7 @@ def test_boundary_conditions(parameter_list: list[str], values: list[float]) -> 
 
     return True
 
+
 def _is_communication_error(error: BaseException) -> bool:
     """Recognize transport errors and the observed SDK error message."""
     seen: set[int] = set()
@@ -195,18 +196,15 @@ class MCADProcessor:
         try:
             pymotorcad.set_motorcad_exe(str(PATH_MCAD_EXE))
 
-            self.mcad_process: pymotorcad.MotorCAD = (
-                pymotorcad.MotorCAD(
-                    open_new_instance=True,
-                    reuse_parallel_instances=False,
-                    keep_instance_open=False,
-                )
+            self.mcad_process: pymotorcad.MotorCAD = pymotorcad.MotorCAD(
+                open_new_instance=True,
+                reuse_parallel_instances=False,
+                keep_instance_open=False,
             )
 
         except (pymotorcad.MotorCADError, OSError) as exc:
             logger.error(
-                "Motor-CAD instance creation failed: "
-                "elapsed_s=%.3f detail=%s",
+                "Motor-CAD instance creation failed: elapsed_s=%.3f detail=%s",
                 perf_counter() - started,
                 exc,
             )
@@ -235,10 +233,10 @@ class MCADProcessor:
         return self
 
     def __exit__(
-            self,
-            exc_type: type[BaseException] | None,
-            exc_val: BaseException | None,
-            exc_tb: TracebackType | None,
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         if exc_type is None:
             self.close()
@@ -266,9 +264,7 @@ class MCADProcessor:
 
     def close(self) -> None:
         if self._close_attempted:
-            logger.debug(
-                "Skipping repeated Motor-CAD close attempt."
-            )
+            logger.debug("Skipping repeated Motor-CAD close attempt.")
             return
 
         self._close_attempted = True
@@ -296,15 +292,13 @@ class MCADProcessor:
         )
 
     def open_motorcad_file(
-            self,
-            file_path: str | Path = PATH_MCAD_BASEFILE,
+        self,
+        file_path: str | Path = PATH_MCAD_BASEFILE,
     ) -> None:
         path = Path(file_path).resolve()
 
         if not path.is_file():
-            raise FileNotFoundError(
-                f"Motor-CAD model file does not exist: {path}"
-            )
+            raise FileNotFoundError(f"Motor-CAD model file does not exist: {path}")
 
         started = perf_counter()
 
@@ -315,9 +309,7 @@ class MCADProcessor:
 
         self._call_mcad(
             operation=f"load_from_file(path={str(path)!r})",
-            call=lambda: self.mcad_process.load_from_file(
-                str(path)
-            ),
+            call=lambda: self.mcad_process.load_from_file(str(path)),
             error_type=MCADInitializationError,
         )
 
@@ -328,17 +320,15 @@ class MCADProcessor:
         )
 
     def set_value_in_mcad(
-            self,
-            variable_name: str,
-            value: float | bool,
+        self,
+        variable_name: str,
+        value: float | bool,
     ) -> None:
         if not variable_name.strip():
             raise ValueError("variable_name must not be empty.")
 
         if not math.isfinite(value):
-            raise ValueError(
-                f"Value for {variable_name} must be finite."
-            )
+            raise ValueError(f"Value for {variable_name} must be finite.")
 
         logger.debug(
             "Setting MCAD variable: name=%s value=%r",
@@ -347,9 +337,7 @@ class MCADProcessor:
         )
 
         self._call_mcad(
-            operation=(
-                f"set_variable(name={variable_name!r}, value={value!r})"
-            ),
+            operation=(f"set_variable(name={variable_name!r}, value={value!r})"),
             call=lambda: self.mcad_process.set_variable(
                 variable_name,
                 value,
@@ -362,9 +350,7 @@ class MCADProcessor:
 
         raw_value = self._call_mcad(
             operation=f"get_variable(name={variable_name!r})",
-            call=lambda: self.mcad_process.get_variable(
-                variable_name
-            ),
+            call=lambda: self.mcad_process.get_variable(variable_name),
         )
 
         if not isinstance(raw_value, (int, float, str)):
@@ -377,14 +363,12 @@ class MCADProcessor:
             value = float(raw_value)
         except (TypeError, ValueError, OverflowError) as exc:
             raise MCADResultError(
-                f"Cannot convert {variable_name} to float: "
-                f"{raw_value!r}."
+                f"Cannot convert {variable_name} to float: {raw_value!r}."
             ) from exc
 
         if not math.isfinite(value):
             raise MCADResultError(
-                f"Motor-CAD returned a nonfinite value "
-                f"for {variable_name}: {value!r}."
+                f"Motor-CAD returned a nonfinite value for {variable_name}: {value!r}."
             )
 
         logger.debug(
@@ -448,7 +432,6 @@ class MCADProcessor:
         Other errors propagate to the worker, which closes the MCAD instance.
         """
 
-
         temporary_values: dict[str, float | bool] = {
             "ShaftSpeed": REFERENCE_SPEED_RPM,
             "PeakCurrent": 0.0,
@@ -463,19 +446,14 @@ class MCADProcessor:
         for name in temporary_values:
             previous_values[name] = self._call_mcad(
                 operation=f"read_reference_setting(name={name!r})",
-                call=lambda name=name: (
-                    self.mcad_process.get_variable(name)
-                ),
+                call=lambda name=name: self.mcad_process.get_variable(name),
             )
 
         for name, value in temporary_values.items():
             self.set_value_in_mcad(name, value)
 
         parameter_names = list(DEFAULT_VALUES)
-        parameter_values = [
-            self.get_value_from_mcad(name)
-            for name in parameter_names
-        ]
+        parameter_values = [self.get_value_from_mcad(name) for name in parameter_names]
 
         result: ReferenceRunResult | None = None
 
@@ -494,27 +472,25 @@ class MCADProcessor:
                 back_emf_constant_ll_peak_vs_per_rad=(
                     self.get_value_from_mcad("Ke_Fundamental")
                 ),
-                peak_back_emf_phase_v=(
-                    self.get_value_from_mcad("PeakBackEMFPhase")
-                ),
+                peak_back_emf_phase_v=(self.get_value_from_mcad("PeakBackEMFPhase")),
             )
 
         for name, value in previous_values.items():
             self._call_mcad(
                 operation=f"restore_reference_setting(name={name!r})",
-                call=lambda name=name, value=value: (
-                    self.mcad_process.set_variable(name, value)
+                call=lambda name=name, value=value: self.mcad_process.set_variable(
+                    name, value
                 ),
             )
 
         return result
 
     def _call_mcad(
-            self,
-            operation: str,
-            call: Callable[[], T],
-            *,
-            error_type: type[MCADExecutionError] = MCADExecutionError,
+        self,
+        operation: str,
+        call: Callable[[], T],
+        *,
+        error_type: type[MCADExecutionError] = MCADExecutionError,
     ) -> T:
         started = perf_counter()
 
@@ -528,9 +504,7 @@ class MCADProcessor:
 
         except (pymotorcad.MotorCADError, OSError) as exc:
             exception_type = (
-                MCADCommunicationError
-                if _is_communication_error(exc)
-                else error_type
+                MCADCommunicationError if _is_communication_error(exc) else error_type
             )
 
             logger.error(
@@ -543,13 +517,10 @@ class MCADProcessor:
                 exc,
             )
 
-            raise exception_type(
-                f"{operation} failed: {exc}"
-            ) from exc
+            raise exception_type(f"{operation} failed: {exc}") from exc
 
         logger.debug(
-            "MCAD operation completed: "
-            "operation=%s elapsed_s=%.3f",
+            "MCAD operation completed: operation=%s elapsed_s=%.3f",
             operation,
             perf_counter() - started,
         )

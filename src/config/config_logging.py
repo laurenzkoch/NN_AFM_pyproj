@@ -22,17 +22,14 @@ LOG_FORMAT = (
 
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
+
 def configure_application_logging() -> None:
     PATH_LOGS.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now(
-        ZoneInfo("Europe/Berlin")
-    ).strftime("%Y%m%d_%H%M%S_%f")
+    timestamp = datetime.now(ZoneInfo("Europe/Berlin")).strftime("%Y%m%d_%H%M%S_%f")
 
     run_id = uuid4().hex[:8]
-    log_path = (
-        PATH_LOGS / f"{timestamp}_{run_id}_application.log"
-    )
+    log_path = PATH_LOGS / f"{timestamp}_{run_id}_application.log"
 
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
@@ -117,6 +114,4 @@ def setup_worker_logging(
     logging.getLogger("src").setLevel(logging.DEBUG)
 
     root_logger.handlers.clear()
-    root_logger.addHandler(
-        logging.handlers.QueueHandler(log_queue)
-    )
+    root_logger.addHandler(logging.handlers.QueueHandler(log_queue))
