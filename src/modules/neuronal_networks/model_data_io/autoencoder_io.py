@@ -42,7 +42,6 @@ def save_autoencoders(
     metrics: dict[str, JSONValue],
     seed: int,
 ) -> None:
-
     if type(seed) is not int or not 0 <= seed < 2**32:
         raise ValueError("Invalid seed.")
 
@@ -113,7 +112,6 @@ def save_autoencoders(
 def load_autoencoders(
     path: Path,
 ) -> tuple[AutoencoderCollection, AutoencoderCollectionCheckpoint]:
-
     raw: object = torch.load(
         Path(path),
         map_location="cpu",

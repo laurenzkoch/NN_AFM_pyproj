@@ -5,7 +5,7 @@ import time
 
 import torch
 
-from src.modules.neuronal_networks.manipulating_data import MachineDataTensor
+from src.modules.neuronal_networks.data_types import MachineDataTensor
 from src.modules.neuronal_networks.NN_types.cnn_autoencoder import Conv3dAutoencoder
 from src.modules.neuronal_networks.NN_types.mlp_with_torch import MLP
 

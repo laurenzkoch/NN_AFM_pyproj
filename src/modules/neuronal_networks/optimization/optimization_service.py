@@ -11,7 +11,7 @@ from src.modules.neuronal_networks.autoencoder_collection import (
 from src.modules.neuronal_networks.autoencoder_collection_trainer import (
     AutoencoderCollectionTrainer,
 )
-from src.modules.neuronal_networks.manipulating_data import (
+from src.modules.neuronal_networks.data_types import (
     TrainValidationTestDataTensors,
 )
 from src.modules.neuronal_networks.nn_training_torch import NNTrainer
@@ -30,8 +30,8 @@ from src.modules.neuronal_networks.surrogate_model import (
     SurrogateModel,
     SurrogateModelTrainer,
 )
-from src.modules.Pipeline_and_GUI.cancellation import CancellationToken
-from src.modules.Pipeline_and_GUI.events import EventType, PipelineEvent
+from src.modules.runtime.cancellation import CancellationToken
+from src.modules.runtime.events import EventType, PipelineEvent
 
 logger = logging.getLogger(__name__)
 

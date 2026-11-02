@@ -6,8 +6,15 @@ from src.config.config_mcad_parameters import (
     DEFAULT_VALUES,
     REFERENCE_SPEED_RPM,
 )
+from src.modules.domain.reference_run import ReferenceRunResult
 from src.modules.process.motor_cad_processes import mcad_processing
-from src.modules.simulation.reference_run import ReferenceRunResult
+
+type ReferenceProcessor = tuple[
+    mcad_processing.MCADProcessor,
+    Mock,
+    dict[str, float | bool],
+    list[dict[str, float | bool]],
+]
 
 
 def test_base_speed_uses_mechanical_angular_speed() -> None:
@@ -40,12 +47,12 @@ def test_reference_rejects_invalid_results(
     field: str,
     value: float,
 ) -> None:
-    values = {
+    values: dict[str, float] = {
         "reference_speed_rpm": 1000.0,
         "back_emf_constant_ll_peak_vs_per_rad": 2.0,
         "peak_back_emf_phase_v": 100.0,
+        **{field: value},
     }
-    values[field] = value
 
     with pytest.raises(ValueError, match=field):
         ReferenceRunResult(**values)
@@ -113,7 +120,7 @@ def reference_processor(
 
 
 def test_reference_run_uses_zero_current_and_restores_settings(
-    reference_processor,
+    reference_processor: ReferenceProcessor,
 ) -> None:
     processor, api, values, snapshots = reference_processor
     previous_values = values.copy()
@@ -148,7 +155,7 @@ def test_reference_run_uses_zero_current_and_restores_settings(
 
 
 def test_rejected_geometry_does_not_start_calculation(
-    reference_processor,
+    reference_processor: ReferenceProcessor,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     processor, api, values, snapshots = reference_processor
@@ -169,7 +176,7 @@ def test_rejected_geometry_does_not_start_calculation(
 
 
 def test_failed_reference_calculation_restores_settings(
-    reference_processor,
+    reference_processor: ReferenceProcessor,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     processor, _api, values, snapshots = reference_processor
@@ -189,7 +196,7 @@ def test_failed_reference_calculation_restores_settings(
 
 
 def test_invalid_calculated_constant_is_rejected(
-    reference_processor,
+    reference_processor: ReferenceProcessor,
 ) -> None:
     processor, _api, values, _snapshots = reference_processor
     values["Ke_Fundamental"] = 0.0
@@ -199,3 +206,29 @@ def test_invalid_calculated_constant_is_rejected(
         match="back_emf_constant_ll_peak_vs_per_rad",
     ):
         processor.execute_reference_run()
+
+
+def test_reference_calculation_error_is_rejected_and_restores_settings(
+    reference_processor: ReferenceProcessor,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    processor, _api, values, _snapshots = reference_processor
+    previous_values = values.copy()
+
+    def fail_calculation() -> bool:
+        raise mcad_processing.MCADCalculationError("Synthetic FEA failure")
+
+    monkeypatch.setattr(
+        processor,
+        "do_calculation",
+        fail_calculation,
+    )
+
+    result = processor.execute_reference_run()
+
+    assert result is None
+    assert values == previous_values
+    assert "reason=calculation_failure" in caplog.text
+    assert "Synthetic FEA failure" in caplog.text
+    assert "Stator_Bore" in caplog.text

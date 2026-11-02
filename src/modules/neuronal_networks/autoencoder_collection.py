@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 
 from src.config.config_mcad_parameters import AXIS_LIST, OUTPUT_NEURON_LIST
-from src.modules.neuronal_networks.manipulating_data import (
+from src.modules.neuronal_networks.data_types import (
     MachineDataTensor,
     TrainValidationTestDataTensors,
 )

@@ -81,7 +81,6 @@ def pack_mlp(model: MLP) -> MLPCheckpoint:
 def pack_autoencoder(
     model: Conv3dAutoencoder,
 ) -> AutoencoderCheckpoint:
-
     allowed_types: tuple[type[nn.Module], ...] = (
         nn.Sequential,
         nn.Conv3d,
@@ -134,7 +133,6 @@ def _restore_state(
     model: nn.Module,
     value: object,
 ) -> None:
-
     if not isinstance(value, dict):
         raise TypeError("state_dict must contain a dictionary.")
 
@@ -154,7 +152,6 @@ def _restore_state(
 
 
 def unpack_mlp(checkpoint: object) -> MLP:
-
     if not isinstance(checkpoint, dict):
         raise TypeError("An MLP checkpoint must contain a dictionary.")
 
@@ -190,7 +187,6 @@ def unpack_mlp(checkpoint: object) -> MLP:
 
 
 def unpack_autoencoder(checkpoint: object) -> Conv3dAutoencoder:
-
     if not isinstance(checkpoint, dict):
         raise TypeError("A CNN checkpoint must contain a dictionary.")
 

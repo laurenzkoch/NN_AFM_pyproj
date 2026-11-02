@@ -50,7 +50,6 @@ logger = logging.getLogger(__name__)
 def _load_report_data(
     model_folder: str | Path,
 ) -> tuple[Path, EvaluationBundle]:
-
     model_directory: Path = resolve_model_directory(model_folder)
     evaluation_path: Path = model_directory / "evaluation.pt"
 

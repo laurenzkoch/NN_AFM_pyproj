@@ -14,6 +14,7 @@ from src.modules.process.motor_cad_processes import (
     mcad_processing as processing,
 )
 from src.modules.simulation import simulation as simulations
+from src.modules.simulation import workers
 
 
 @pytest.fixture
@@ -127,13 +128,15 @@ def test_calculation_errors_are_not_converted_to_false(
     expected_type: type[errors.MCADExecutionError],
 ) -> None:
     original = processing.pymotorcad.MotorCADError(message)
-    processor.mcad_process.do_magnetic_calculation.side_effect = original
+
+    calculation = Mock(side_effect=original)
+    processor.mcad_process.do_magnetic_calculation = calculation
 
     with pytest.raises(expected_type) as captured:
         processor.do_calculation()
 
     assert captured.value.__cause__ is original
-    processor.mcad_process.do_magnetic_calculation.assert_called_once()
+    calculation.assert_called_once_with()
 
 
 def test_close_attempt_is_not_repeated(
@@ -145,10 +148,13 @@ def test_close_attempt_is_not_repeated(
         lambda _seconds: None,
     )
 
+    quit_call = Mock()
+    processor.mcad_process.quit = quit_call
+
     processor.close()
     processor.close()
 
-    processor.mcad_process.quit.assert_called_once()
+    quit_call.assert_called_once_with()
 
 
 def test_shutdown_discards_instance_even_when_close_fails(
@@ -210,19 +216,18 @@ def test_worker_cleanup_failure_preserves_original_error(
     processor.execute_mcad_simulation.side_effect = original
 
     monkeypatch.setattr(
-        "src.modules.simulation.simulation.mcad_instance_handling.get_mcad_instance",
+        "src.modules.simulation.workers.mcad_instance_handling.get_mcad_instance",
         lambda: processor,
     )
 
     cleanup = Mock(side_effect=errors.MCADCleanupError("quit failed"))
     monkeypatch.setattr(
-        "src.modules.simulation.simulation."
-        "mcad_instance_handling.shutdown_mcad_instance",
+        "src.modules.simulation.workers.mcad_instance_handling.shutdown_mcad_instance",
         cleanup,
     )
 
     with pytest.raises(errors.MCADCommunicationError) as captured:
-        simulations._execute_simulation(
+        workers.execute_simulation(
             {},
             log_context="batch=b1 geometry=g1 task=t1",
         )

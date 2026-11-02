@@ -15,7 +15,7 @@ from src.modules.geometry.feature_schema import MACHINE_DEFINITION
 from src.modules.neuronal_networks.autoencoder_collection import (
     AutoencoderCollection,
 )
-from src.modules.neuronal_networks.manipulating_data import (
+from src.modules.neuronal_networks.data_types import (
     MachineDataTensor,
     TrainValidationTestDataTensors,
 )
@@ -152,7 +152,6 @@ def save_evaluation(
     model: SurrogateModel | AutoencoderCollection,
     data: TrainValidationTestDataTensors,
 ) -> Path:
-
     if isinstance(model, AutoencoderCollection):
         model.validate_compatible(data)
 

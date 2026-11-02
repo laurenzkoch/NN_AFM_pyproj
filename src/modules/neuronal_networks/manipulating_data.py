@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -16,13 +15,9 @@ from src.config.config_mcad_parameters import (
     AXIS_LIST,
     CSV_DECIMAL_PLACES,
     CSV_PARAMETERS,
-    D_CURRENT_DENSITY,
     GEO_PARAMETERS,
     GEO_PARAMETERS_MIN_MAX_DICT,
-    MAP_SIZE,
     OUTPUT_NEURON_LIST,
-    Q_CURRENT_DENSITY,
-    SHAFT_SPEED_NORM,
 )
 from src.modules.data_managment.csv_io import import_data_from_csv
 from src.modules.data_managment.experiment_utils import (
@@ -30,86 +25,35 @@ from src.modules.data_managment.experiment_utils import (
     geometry_ids,
     require_disjoint_split_ids,
 )
+from src.modules.data_managment.grid_alignment import GridAligner
+from src.modules.data_managment.map_grid import MapGrid
+from src.modules.data_managment.simulation_metadata import (
+    is_compatible_metadata,
+    read_metadata,
+)
 from src.modules.geometry.feature_schema import MACHINE_DEFINITION
 from src.modules.geometry.lambda_geometry import (
     GEOMETRY_INPUT_COLUMNS,
     LambdaValues,
     lambdas_from_geometry,
 )
+from src.modules.neuronal_networks.data_types import (
+    MachineDataTensor,
+    TrainValidationTestDataTensors,
+)
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class MachineDataTensor:
-    geometry_tensor: Tensor
-    map_tensor: Tensor
-
-    def shuffle(self) -> None:
-        generator = torch.Generator().manual_seed(42)
-        permutation = torch.randperm(
-            self.geometry_tensor.shape[0],
-            generator=generator,
-        )
-        self.geometry_tensor = self.geometry_tensor[permutation]
-        self.map_tensor = self.map_tensor[permutation]
-
-    def select_channel(self, channel_index: int) -> MachineDataTensor:
-        if self.map_tensor.ndim != 5:
-            raise ValueError("Expected a five-dimensional map tensor.")
-
-        if (
-            self.geometry_tensor.ndim != 2
-            or self.geometry_tensor.shape[0] != self.map_tensor.shape[0]
-        ):
-            raise ValueError(
-                "Geometry and map tensors must describe the same machines."
-            )
-
-        if (
-            type(channel_index) is not int
-            or not 0 <= channel_index < self.map_tensor.shape[-1]
-        ):
-            raise ValueError("Output channel index is out of range.")
-
-        return MachineDataTensor(
-            geometry_tensor=self.geometry_tensor.detach().clone(),
-            map_tensor=self.map_tensor[..., channel_index : channel_index + 1]
-            .detach()
-            .clone(),
-        )
-
-
-@dataclass
-class TrainValidationTestDataTensors:
-    train: MachineDataTensor
-    validation: MachineDataTensor
-    test: MachineDataTensor | None
-    map_axes: dict[str, np.ndarray]
-    target_minimum: Tensor
-    target_denominator: Tensor
-    split_machine_ids: dict[str, tuple[str, ...]]
-    source_hashes: dict[str, str]
 
 
 class DataLoader:
     def __init__(self, training_directory: Path) -> None:
         self.training_directory = training_directory
 
-        self.map_axes: dict[str, NDArray[np.float64]] = {
-            AXIS_LIST[0]: np.asarray(
-                np.linspace(*SHAFT_SPEED_NORM, MAP_SIZE[0]),
-                dtype=np.float64,
-            ),
-            AXIS_LIST[1]: np.asarray(
-                np.linspace(*Q_CURRENT_DENSITY, MAP_SIZE[1]),
-                dtype=np.float64,
-            ),
-            AXIS_LIST[2]: np.asarray(
-                np.linspace(*D_CURRENT_DENSITY, MAP_SIZE[2]),
-                dtype=np.float64,
-            ),
-        }
+        self._set_grid(MapGrid.from_config())
+        self.csv_decimal_places = CSV_DECIMAL_PLACES
+
+    def _set_grid(self, grid: MapGrid) -> None:
+        self.map_axes: dict[str, NDArray[np.float64]] = grid.axes()
 
         self.map_indices: dict[str, dict[float, int]] = {
             name: {value: index for index, value in enumerate(values)}
@@ -129,6 +73,35 @@ class DataLoader:
         if len(set(names)) != len(names):
             raise ValueError("Each CSV source must be listed once")
 
+        for name in names:
+            if Path(name).name != name or Path(name).suffix.lower() != ".csv":
+                raise ValueError("Use CSV filenames without a directory")
+
+        reference = read_metadata(self.training_directory / filename)
+
+        if not is_compatible_metadata(reference, reference):
+            raise ValueError(f"Training metadata needs explicit migration: {filename}")
+
+        grid = MapGrid.from_payload(reference["payload"].get("map_grid"))
+        self._set_grid(grid)
+
+        precision = reference["payload"].get("float_decimal_places")
+
+        if type(precision) is not int or not 0 <= precision <= 15:
+            raise ValueError("Invalid metadata float_decimal_places.")
+
+        self.csv_decimal_places = precision
+        aligner = GridAligner(
+            map_axes=self.map_axes,
+            csv_decimal_places=self.csv_decimal_places,
+        )
+
+        for name in test_filenames:
+            candidate = read_metadata(self.training_directory / name)
+
+            if not is_compatible_metadata(candidate, reference):
+                raise ValueError(f"Incompatible optimization source metadata: {name}")
+
         records = []
         source_hashes = {}
         for name in names:
@@ -140,8 +113,10 @@ class DataLoader:
             self._test_columns(_dataframe)
             _dataframe = _dataframe[CSV_PARAMETERS].copy()
             _dataframe = self._recalculate_data(_dataframe)
-            _dataframe = self._align_speed_grid(_dataframe)
-            _dataframe = self._align_current_density_grid(_dataframe)
+
+            _dataframe = aligner.align_speed_grid(_dataframe)
+            _dataframe = aligner.align_current_density_grid(_dataframe)
+
             _dataframe = self._clean_data(_dataframe, name)
             if _dataframe.empty:
                 raise ValueError(f"No complete reference-grid maps: {name}")
@@ -338,111 +313,6 @@ class DataLoader:
         _machines = df.groupby(MACHINE_DEFINITION, sort=False)
         return _machines
 
-    def _align_axis_grid(
-        self,
-        df: pd.DataFrame,
-        axis_name: str,
-        possible_values: NDArray[np.float64],
-        positions: NDArray[np.intp],
-    ) -> None:
-        """Assign exact grid values where rounding allows one unique match."""
-        numerical_tolerance: float = 1e-10
-
-        # First dimension: CSV rows; remaining dimensions: rounding cases.
-        bounds: NDArray[np.float64] = possible_values.reshape(
-            positions.size,
-            -1,
-        )
-        lower = bounds.min(axis=1)
-        upper = bounds.max(axis=1)
-
-        axis: NDArray[np.float64] = self.map_axes[axis_name]
-        candidates = (axis[None, :] >= lower[:, None] - numerical_tolerance) & (
-            axis[None, :] <= upper[:, None] + numerical_tolerance
-        )
-        unique = candidates.sum(axis=1) == 1
-
-        aligned: NDArray[np.float64] = df[axis_name].to_numpy(
-            dtype=np.float64,
-            copy=True,
-        )
-        aligned[positions[unique]] = axis[candidates[unique].argmax(axis=1)]
-        df[axis_name] = aligned
-
-    def _align_speed_grid(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Recover speed-grid coordinates within CSV rounding bounds."""
-        if df.empty:
-            return df
-
-        half_resolution = 0.5 * 10.0 ** (-CSV_DECIMAL_PLACES)
-        offsets = np.array(
-            [-half_resolution, half_resolution],
-            dtype=np.float64,
-        )
-
-        speed = df["ShaftSpeed"].to_numpy(dtype=np.float64)
-        base_speed = df["BaseSpeedRPM"].to_numpy(dtype=np.float64)
-
-        if bool((base_speed <= half_resolution).any()):
-            raise ValueError("Base speed is too small for speed-grid alignment.")
-
-        speed_bounds = speed[:, None] + offsets
-        base_speed_bounds = base_speed[:, None] + offsets
-
-        possible_values = speed_bounds[:, :, None] / base_speed_bounds[:, None, :]
-
-        self._align_axis_grid(
-            df=df,
-            axis_name=AXIS_LIST[0],
-            possible_values=possible_values,
-            positions=np.arange(len(df), dtype=np.intp),
-        )
-
-        return df
-
-    def _align_current_density_grid(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Recover current-density coordinates within CSV rounding bounds."""
-        half_resolution = 0.5 * 10.0 ** (-CSV_DECIMAL_PLACES)
-        offsets: NDArray[np.float64] = np.array(
-            [-half_resolution, half_resolution],
-            dtype=np.float64,
-        )
-
-        peak_current = df["PeakCurrent"].to_numpy(dtype=np.float64)
-        density = df["RMSCurrentDensity"].to_numpy(dtype=np.float64)
-
-        usable = (peak_current > half_resolution) & (density > half_resolution)
-        positions: NDArray[np.intp] = np.flatnonzero(usable)
-
-        if positions.size == 0:
-            return df
-
-        peak_bounds = peak_current[usable, None] + offsets
-        density_bounds = density[usable, None] + offsets
-
-        for axis_name, current_name in (
-            (AXIS_LIST[1], "RMSPhaseCurrent_Q"),
-            (AXIS_LIST[2], "RMSPhaseCurrent_D"),
-        ):
-            current = df[current_name].to_numpy(dtype=np.float64)
-            current_bounds = current[usable, None] + offsets
-
-            possible_values = (
-                np.sqrt(2.0)
-                * current_bounds[:, :, None, None]
-                * density_bounds[:, None, :, None]
-                / peak_bounds[:, None, None, :]
-            )
-
-            self._align_axis_grid(
-                df=df,
-                axis_name=axis_name,
-                possible_values=possible_values,
-                positions=positions,
-            )
-
-        return df
-
     def _clean_data(self, df: pd.DataFrame, name: str) -> pd.DataFrame:
         remove = []
         for geometry, frame in self._identify_machines_in_csv(df):
@@ -488,7 +358,13 @@ class DataLoader:
             dtype=np.float32,
         )
         _map_array = np.full(
-            (num_machines, *MAP_SIZE, len(OUTPUT_NEURON_LIST)), np.nan, dtype=np.float32
+            (
+                num_machines,
+                *(len(map_indices[name]) for name in AXIS_LIST),
+                len(OUTPUT_NEURON_LIST),
+            ),
+            np.nan,
+            dtype=np.float32,
         )
         for idx_machine, (geometry_tuple, map_df) in enumerate(machine_groups):
             _machine_geometry_array[idx_machine, ...] = geometry_tuple

@@ -4,6 +4,7 @@ NN_AFM_pyproj
 Motor-CAD-Simulationen und neuronale Ersatzmodelle für Axialflussmaschinen
 Abgleich mit Quellcode, Tests und Konfiguration: 28.10.2026
 Projektformatierung und zugehörige Prüfungen: 29.10.2026 (Abschnitt 13)
+Auswertungsexport mit evaluation_io.py abgeglichen: 02.11.2026 (Abschnitt 7)
 
 Das Projekt erzeugt Maschinengeometrien und Betriebspunkte, berechnet sie mit
 Ansys Motor-CAD und schreibt Ergebnisse als CSV. PyTorch verarbeitet vollständige
@@ -481,6 +482,25 @@ Metriken: normalisierter Gesamt-MSE, R² je Kanal und ungewichtetes Mittel,
 physikalischer MAE/MSE je Kanal. Konstante Referenzkanäle ergeben R²=None und
 kein definiertes Gesamt-R². Unterschiedliche Einheiten werden nicht zu einem
 physikalischen Gesamtfehler vermischt.
+
+save_evaluation(model_path, model, data) erwartet eine bereits gespeicherte
+Modelldatei und liefert den Pfad zur evaluation.pt im selben Ordner zurück.
+Train/Validation werden immer exportiert; bei data.test=None fehlt der test-Eintrag.
+Kennfelder liegen als CPU-float64-Tensoren ohne Gradienten in der Reihenfolge
+(Maschine, normierte Drehzahl, q, d, Kanal) vor. geometry_inputs übernimmt die
+Geometrieeingaben als CPU-Kopie; save_evaluation normalisiert sie nicht erneut.
+Die Rückskalierung lautet Wert_physikalisch = Wert_normalisiert *
+target_denominator + target_minimum, jeweils kanalweise aus data.
+points_per_channel zählt Maschinen * Drehzahlpunkte * q-Punkte * d-Punkte.
+
+Der Export prüft Tensorformen, Maschinen-/ID-Anzahlen, endliche Werte, positive
+Skalierungsnenner und passende Achsenlängen; CNN-Sammlungen prüfen zusätzlich
+ihre Datenkompatibilität. Der Modellhash wird vor und nach der Auswertung gelesen.
+Eine bestehende evaluation.pt wird erst beim atomaren Ersetzen überschrieben.
+Der Aufrufer muss das zur Modelldatei passende Modellobjekt übergeben: Der Hash
+bindet die Datei, vergleicht aber nicht deren Gewichte mit dem übergebenen Objekt.
+Das genaue Feldschema und die Metrikdefinitionen stehen in
+docs/DATEIEN_UND_SPEICHERORTE.md, Abschnitt 3.
 
 Einzelplots und A4-Querformatbericht zeigen Referenz gegen Vorhersage bzw.
 Rekonstruktion. Bericht prüft Modellhash, verlangt sieben Kanäle und Training/

@@ -9,13 +9,16 @@ from threading import Lock, Thread
 from typing import Protocol
 
 from src.config.config_logging import setup_main_logging
-from src.modules.Pipeline_and_GUI.cancellation import (
+from src.modules.process.resources import determine_number_of_kernels
+from src.modules.runtime.cancellation import (
     CancellationToken,
     PipelineCancelledError,
 )
-from src.modules.Pipeline_and_GUI.events import EventType, PipelineEvent
-from src.modules.Pipeline_and_GUI.userinterface import MyUserInterface
-from src.modules.process.resources import determine_number_of_kernels
+from src.modules.runtime.contracts import (
+    PipelineUI,
+    PipelineUIFactory,
+)
+from src.modules.runtime.events import EventType, PipelineEvent
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +32,7 @@ class MyPipeline:
         self,
         service_name: str,
         num_kernel: int = 1,
+        ui_factory: PipelineUIFactory | None = None,
     ) -> None:
         self._used = False
         self._start_lock = Lock()
@@ -46,7 +50,8 @@ class MyPipeline:
         self._queues_closed: bool = False
         self.queue_listener: QueueListener | None = None
 
-        self.ui: MyUserInterface | None = None
+        self.ui_factory: PipelineUIFactory | None = ui_factory
+        self.ui: PipelineUI | None = None
         self._terminal_received = False
 
         self.service: PipelineService
@@ -77,7 +82,7 @@ class MyPipeline:
         try:
             self.queue_listener = setup_main_logging(self.log_queue)
 
-            ui: MyUserInterface = self._initialize_ui(title=self.service_name)
+            ui: PipelineUI = self._initialize_ui(title=self.service_name)
             self.ui = ui
 
             service_thread: Thread = self._initialize_service_thread()
@@ -104,8 +109,13 @@ class MyPipeline:
                         root_logger.setLevel(saved_level)
                         self._close_queues()
 
-    def _initialize_ui(self, title: str) -> MyUserInterface:
-        return MyUserInterface(
+    def _initialize_ui(self, title: str) -> PipelineUI:
+        factory = self.ui_factory
+
+        if factory is None:
+            raise RuntimeError("No UI factory configured; pass ui_factory explicitly.")
+
+        return factory(
             max_value=self.max_progress_steps,
             title=title,
             overall_max_value=self.overall_max_value,
@@ -208,7 +218,7 @@ class MyPipeline:
             ui.mark_finished()
             return
 
-        ui.root.after(100, self._poll_queue)
+        ui.schedule(100, self._poll_queue)
 
     def _close_queues(self) -> None:
         if self._queues_closed:

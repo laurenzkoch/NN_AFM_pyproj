@@ -6,10 +6,8 @@ from src.modules.data_managment.experiment_utils import validate_search_settings
 from src.modules.neuronal_networks.autoencoder_collection import (
     AutoencoderCollection,
 )
-from src.modules.neuronal_networks.manipulating_data import (
-    DataLoader,
-    TrainValidationTestDataTensors,
-)
+from src.modules.neuronal_networks.data_types import TrainValidationTestDataTensors
+from src.modules.neuronal_networks.manipulating_data import DataLoader
 from src.modules.neuronal_networks.nn_training_torch import NNTrainer
 from src.modules.neuronal_networks.optimization.optimization_service import (
     OptimizationService,
@@ -20,8 +18,9 @@ from src.modules.neuronal_networks.optimization.optimization_types import (
     NetworkType,
 )
 from src.modules.neuronal_networks.surrogate_model import SurrogateModel
-from src.modules.Pipeline_and_GUI.events import EventType, PipelineEvent
-from src.modules.Pipeline_and_GUI.pipeline import MyPipeline
+from src.modules.runtime.contracts import PipelineUIFactory
+from src.modules.runtime.events import EventType, PipelineEvent
+from src.modules.runtime.pipeline import MyPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +41,7 @@ class OptimizationPipline(MyPipeline):
         seed: int = 42,
         worker_timeout_seconds: float | None = None,
         autoencoders: AutoencoderCollection | None = None,
+        ui_factory: PipelineUIFactory | None = None,
     ) -> None:
         validate_search_settings(
             search_space.max_num_layers,
@@ -67,6 +67,7 @@ class OptimizationPipline(MyPipeline):
         super().__init__(
             service_name="Optimization",
             num_kernel=num_kernel,
+            ui_factory=ui_factory,
         )
 
         try:
@@ -107,9 +108,14 @@ class OptimizationPipline(MyPipeline):
         except BaseException:
             try:
                 self._close_queues()
-            except Exception:
+            except (
+                OSError,
+                ValueError,
+                RuntimeError,
+            ) as cleanup_error:
                 logger.exception(
-                    "Queue cleanup failed during optimization initialization"
+                    "Queue cleanup failed during optimization initialization: %s",
+                    cleanup_error,
                 )
             raise
 

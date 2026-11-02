@@ -13,7 +13,7 @@ from src.config.config_mcad_parameters import (
 )
 from src.modules.data_managment.experiment_utils import file_sha256
 from src.modules.geometry.feature_schema import MACHINE_DEFINITION
-from src.modules.neuronal_networks.manipulating_data import (
+from src.modules.neuronal_networks.data_types import (
     MachineDataTensor,
     TrainValidationTestDataTensors,
 )

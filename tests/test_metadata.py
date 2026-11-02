@@ -136,7 +136,7 @@ def test_corrupt_fingerprint_and_orphan_sidecar_rejected(
         module.prepare_result_csv(path, metadata)
 
 
-def test_version_3_requires_matching_setup_and_valid_fingerprints(
+def test_version_4_requires_matching_setup_and_valid_fingerprints(
     metadata: SimulationMetadata,
 ) -> None:
     assert module.is_compatible_metadata(metadata, metadata)
@@ -194,7 +194,8 @@ def test_metadata_builder_does_not_hash_python_files(
 
     result: SimulationMetadata = module.build_simulation_metadata()
 
-    assert result["payload"]["metadata_version"] == 3
+    assert result["payload"]["metadata_version"] == 4
+    assert result["payload"]["map_grid"] == (module.MapGrid.from_config().to_payload())
     assert result["payload"]["float_decimal_places"] == CSV_DECIMAL_PLACES
     assert result["payload"]["reference_speed_rpm"] == REFERENCE_SPEED_RPM
     assert result["payload"]["reference_current_a"] == 0.0
@@ -214,7 +215,7 @@ def test_metadata_builder_does_not_hash_python_files(
     assert result["fingerprint"] == canonical_hash(result["payload"])
 
 
-@pytest.mark.parametrize("previous_version", [1, 2])
+@pytest.mark.parametrize("previous_version", [1, 2, 3])
 def test_old_metadata_versions_are_incompatible(
     metadata: SimulationMetadata,
     previous_version: int,

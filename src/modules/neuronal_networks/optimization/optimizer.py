@@ -3,7 +3,6 @@ from __future__ import annotations
 import copy
 import hashlib
 import logging
-import random
 import sys
 import time
 from dataclasses import asdict, dataclass
@@ -17,7 +16,6 @@ import optuna
 import torch
 from optuna.storages import JournalStorage
 
-from src.config.config_logging import setup_worker_logging
 from src.config.config_mcad_parameters import (
     OUTPUT_NEURON_LIST,
 )
@@ -28,15 +26,13 @@ from src.modules.data_managment.experiment_utils import (
     validate_search_settings,
 )
 from src.modules.geometry.feature_schema import MACHINE_DEFINITION
-from src.modules.neuronal_networks.manipulating_data import (
-    MachineDataTensor,
+from src.modules.neuronal_networks.data_types import (
     TrainValidationTestDataTensors,
 )
 from src.modules.neuronal_networks.nn_training_torch import NNTrainer
 from src.modules.neuronal_networks.NN_types.cnn_autoencoder import (
     Conv3dAutoencoder,
 )
-from src.modules.neuronal_networks.NN_types.mlp_with_torch import MLP
 from src.modules.neuronal_networks.optimization.journal_storage import (
     create_journal_storage,
 )
@@ -47,8 +43,11 @@ from src.modules.neuronal_networks.optimization.optimization_types import (
     NetworkType,
     checked_network_type,
 )
-from src.modules.Pipeline_and_GUI.cancellation import CancellationToken
-from src.modules.Pipeline_and_GUI.events import EventType, PipelineEvent
+from src.modules.neuronal_networks.optimization.search_worker import (
+    optuna_worker,
+)
+from src.modules.runtime.cancellation import CancellationToken
+from src.modules.runtime.events import PipelineEvent
 
 logger = logging.getLogger(__name__)
 
@@ -59,93 +58,6 @@ class OptimizationResult:
     mse: float | None
     r_squared: float | None
     trial_number: int
-
-
-def _optuna_worker(
-    data: TrainValidationTestDataTensors,
-    trainer: NNTrainer,
-    network_type: NetworkType,
-    channel_index: int,
-    search_space: NetworkSearchSpace,
-    n_trials: int,
-    progress_queue: ProcessQueue[PipelineEvent],
-    study_name: str,
-    journal_path: Path,
-    seed: int,
-    objective_seed: int,
-    log_queue: ProcessQueue[logging.LogRecord] | None = None,
-    trained_autoencoder: Conv3dAutoencoder | None = None,
-) -> None:
-    if log_queue is not None:
-        setup_worker_logging(log_queue)
-        optuna.logging.disable_default_handler()
-        optuna.logging.enable_propagation()
-
-    try:
-        torch.set_num_threads(1)
-
-        random.seed(seed)
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-
-        channel_name: str = OUTPUT_NEURON_LIST[channel_index]
-
-        logger.info(
-            "Starting %s optimization worker: channel=%s, seed=%d",
-            network_type,
-            channel_name,
-            seed,
-        )
-        storage: JournalStorage = create_journal_storage(journal_path)
-        study: optuna.Study = optuna.load_study(
-            study_name=study_name,
-            storage=storage,
-            sampler=optuna.samplers.TPESampler(seed=seed),
-        )
-
-        objective: Objective = Objective(
-            data=data,
-            trainer=trainer,
-            network_type=network_type,
-            channel_index=channel_index,
-            search_space=search_space,
-            seed=objective_seed,
-            trained_autoencoder=trained_autoencoder,
-        )
-
-        def _progress_callback(
-            _study: optuna.Study,
-            _trial: optuna.trial.FrozenTrial,
-        ) -> None:
-            progress_queue.put(
-                PipelineEvent(
-                    event_type=EventType.PROGRESS,
-                    increment=1,
-                    outcome="trial_completed",
-                )
-            )
-
-        study.optimize(
-            objective,
-            n_trials=n_trials,
-            callbacks=[_progress_callback],
-        )
-
-        logger.info(
-            "Completed %s optimization worker: channel=%s, seed=%d",
-            network_type,
-            channel_name,
-            seed,
-        )
-
-    except BaseException:
-        logger.exception(
-            "Optimization worker failed: type=%s, channel_index=%d, seed=%d",
-            network_type,
-            channel_index,
-            seed,
-        )
-        raise
 
 
 class NNOptimizer:
@@ -370,11 +282,15 @@ class NNOptimizer:
         relevant_sources: tuple[str, ...] = (
             "src/config/config_mcad_parameters.py",
             "src/modules/neuronal_networks/manipulating_data.py",
+            "src/modules/neuronal_networks/data_types.py",
+            "src/modules/data_managment/grid_alignment.py",
             "src/modules/neuronal_networks/nn_training_torch.py",
             "src/modules/neuronal_networks/NN_types/mlp_with_torch.py",
             "src/modules/neuronal_networks/NN_types/cnn_autoencoder.py",
             "src/modules/neuronal_networks/optimization/optimization_types.py",
             "src/modules/neuronal_networks/optimization/optimizer.py",
+            "src/modules/neuronal_networks/optimization/objective.py",
+            "src/modules/neuronal_networks/optimization/search_worker.py",
         )
 
         map_shape: tuple[int, ...] = tuple(self.data.train.map_tensor.shape[1:-1])
@@ -476,7 +392,7 @@ class NNOptimizer:
                 self.cancellation.raise_if_requested()
 
                 process = Process(
-                    target=_optuna_worker,
+                    target=optuna_worker,
                     kwargs={
                         "data": self.data,
                         "trainer": self.trainer,
@@ -548,180 +464,3 @@ class NNOptimizer:
                 errors.append(exc)
         if errors:
             raise ExceptionGroup("Worker cleanup failed", errors)
-
-
-class Objective:
-    def __init__(
-        self,
-        data: TrainValidationTestDataTensors,
-        trainer: NNTrainer,
-        network_type: NetworkType,
-        channel_index: int,
-        search_space: NetworkSearchSpace,
-        seed: int,
-        trained_autoencoder: Conv3dAutoencoder | None = None,
-    ) -> None:
-        if network_type not in ("MLP", "CNN"):
-            raise ValueError("network_type must be 'MLP' or 'CNN'.")
-
-        if type(channel_index) is not int or not 0 <= channel_index < len(
-            OUTPUT_NEURON_LIST
-        ):
-            raise ValueError("Invalid output channel index.")
-
-        if network_type == "CNN" and trained_autoencoder is not None:
-            raise ValueError("CNN optimization cannot receive a trained autoencoder.")
-
-        self.data: TrainValidationTestDataTensors = data
-        self.trainer: NNTrainer = trainer
-        self.network_type: NetworkType = network_type
-        self.channel_index: int = channel_index
-        self.search_space: NetworkSearchSpace = search_space
-        self.seed: int = seed
-
-        self.trained_autoencoder: Conv3dAutoencoder | None = copy.deepcopy(
-            trained_autoencoder
-        )
-
-        map_shape: tuple[int, ...] = tuple(data.train.map_tensor.shape[1:-1])
-
-        if self.trained_autoencoder is not None:
-            if self.trained_autoencoder.input_channels != 1:
-                raise ValueError("The supplied CNN must process one output channel.")
-
-            if tuple(self.trained_autoencoder.map_shape) != map_shape:
-                raise ValueError("The supplied CNN has an incompatible map shape.")
-
-    def __call__(self, trial: optuna.Trial) -> float:
-        trial_seed: int = (self.seed + trial.number) % 2**32
-        random.seed(trial_seed)
-        np.random.seed(trial_seed)
-        torch.manual_seed(trial_seed)
-
-        layers: tuple[int, ...] = self._get_layer(trial)
-        latent_dim: int | None = None
-
-        if self.network_type == "CNN":
-            latent_dim = trial.suggest_int(
-                "latent_dim",
-                self.search_space.min_latent_dim,
-                self.search_space.max_latent_dim,
-                step=self.search_space.latent_step,
-            )
-
-        architecture: NetworkArchitecture = NetworkArchitecture(
-            network_type=checked_network_type(self.network_type),
-            layers=layers,
-            latent_dim=latent_dim,
-            input_channels=1,
-        )
-
-        train_data: MachineDataTensor = self.data.train.select_channel(
-            self.channel_index
-        )
-        validation_data: MachineDataTensor = self.data.validation.select_channel(
-            self.channel_index
-        )
-        map_shape: tuple[int, ...] = tuple(train_data.map_tensor.shape[1:-1])
-
-        autoencoder: Conv3dAutoencoder | None = copy.deepcopy(self.trained_autoencoder)
-        network: MLP | Conv3dAutoencoder
-
-        if architecture.network_type == "CNN":
-            if architecture.latent_dim is None:
-                raise ValueError("A CNN requires a latent dimension.")
-
-            network = Conv3dAutoencoder(
-                input_channels=architecture.input_channels,
-                features=architecture.layers,
-                latent_dim=architecture.latent_dim,
-                map_shape=map_shape,
-            )
-        else:
-            output_dims: tuple[int, ...] = (
-                (*map_shape, 1) if autoencoder is None else (autoencoder.latent_dim,)
-            )
-
-            network = MLP(
-                num_input_neurons=train_data.geometry_tensor.shape[1],
-                output_dims=output_dims,
-                hidden_layer_neurons=architecture.layers,
-            )
-
-        self.trainer.start(
-            neuronal_network=network,
-            train_data=train_data,
-            validation_data=validation_data,
-            trained_autoencoder=autoencoder,
-        )
-
-        validation_loss: float = float(self.trainer.best_validation_loss)
-
-        if not np.isfinite(validation_loss):
-            raise FloatingPointError("The trial produced a non-finite validation loss.")
-
-        trial.set_user_attr(
-            "architecture",
-            {
-                "network_type": architecture.network_type,
-                "layers": list(architecture.layers),
-                "latent_dim": architecture.latent_dim,
-                "input_channels": architecture.input_channels,
-            },
-        )
-        trial.set_user_attr("channel_index", self.channel_index)
-        trial.set_user_attr(
-            "loss_scope",
-            (
-                "small_map"
-                if architecture.network_type == "MLP" and autoencoder is not None
-                else "full_map"
-            ),
-        )
-
-        return validation_loss
-
-    def _get_layer(self, trial: optuna.Trial) -> tuple[int, ...]:
-
-        choices: tuple[int, ...] = self.search_space.unit_choices()
-
-        if self.network_type == "MLP":
-            count: int = trial.suggest_int(
-                "n_layers",
-                1,
-                self.search_space.max_num_layers,
-            )
-
-            return tuple(
-                int(
-                    trial.suggest_categorical(
-                        f"neurons_{index}",
-                        choices,
-                    )
-                )
-                for index in range(count)
-            )
-
-        layer_limit: int = min(
-            self.search_space.max_num_layers,
-            len(choices),
-        )
-        count = trial.suggest_int("n_layers", 1, layer_limit)
-
-        features: list[int] = []
-        previous_index: int = -1
-
-        for layer_index in range(count):
-            # Reserve sufficient larger feature counts for later layers.
-            maximum_index: int = len(choices) - (count - layer_index)
-
-            feature_index: int = trial.suggest_int(
-                f"feature_index_{layer_index}",
-                previous_index + 1,
-                maximum_index,
-            )
-
-            features.append(choices[feature_index])
-            previous_index = feature_index
-
-        return tuple(features)

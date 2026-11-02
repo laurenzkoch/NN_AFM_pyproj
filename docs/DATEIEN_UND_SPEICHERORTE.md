@@ -1,6 +1,7 @@
 # Dateien: Herkunft, Formate und Speicherorte
 
 Stand: 28.10.2026, mit dem vorhandenen Quellcode abgeglichen.
+Auswertungsexport in Abschnitt 3: am 02.11.2026 mit `evaluation_io.py` abgeglichen.
 
 `<Projekt>` bezeichnet `D:\Python_Projects\NN_AFM_pyproj`. Relative Datenpfade
 werden in [config_paths.py](../src/config/config_paths.py) aus dem Projektpfad
@@ -132,6 +133,79 @@ Dazu kommen Achsen, Feature-/Kanalnamen, Quellenhashes und Modellname/-hash.
 `value_scale="physical"` bezieht sich auf Kennfelder; die Geometrie bleibt normalisiert.
 Die Datei bewahrt Referenzwerte für spätere Diagramme auf, ersetzt aber nicht die
 vollständigen Original-CSVs samt Simulationsparametern und Herkunft.
+
+### Feldschema von `evaluation.pt`
+
+Die Typen `EvaluationBundle` und `EvaluationSplit` sowie der Export liegen in
+[evaluation_io.py](../src/modules/neuronal_networks/model_data_io/evaluation_io.py).
+`save_evaluation(model_path, model, data) -> Path` schreibt immer `evaluation.pt`
+neben die bereits vorhandene Modelldatei. Eine gleichnamige Auswertung wird ersetzt;
+die Modelldatei selbst darf deshalb nicht `evaluation.pt` heißen.
+
+| Feld im Bundle | Inhalt |
+|---|---|
+| `format_version` | `2` |
+| `evaluation_kind` | `"prediction"` für `SurrogateModel` (Referenz-/Kombimodell), `"reconstruction"` für `AutoencoderCollection` |
+| `value_scale` | `"physical"`, gilt für die beiden Kennfeldtensoren |
+| `model_filename`, `model_sha256` | Dateiname ohne Ordner und SHA-256 der vorhandenen Modelldatei |
+| `feature_names` | Liste aus `MACHINE_DEFINITION`, aktuell 14 Features |
+| `channel_names` | Liste aus `OUTPUT_NEURON_LIST`, aktuell sieben Kanäle |
+| `axis_names` | Liste aus `AXIS_LIST`: normierte Drehzahl, q-Stromdichte, d-Stromdichte |
+| `map_axes` | Achsenname → Liste von Float-Stützstellen; Längen müssen zu den Kennfeldern passen |
+| `source_hashes` | Kopie der Quellenhashes aus `data.source_hashes` |
+| `splits` | `train` und `validation`, zusätzlich `test` genau dann, wenn `data.test` vorhanden ist |
+
+Jeder Split enthält:
+
+| Feld | Typ / Form und Bedeutung |
+|---|---|
+| `machine_ids` | `tuple[str, ...]`, eine ID je Maschine in Tensorreihenfolge |
+| `geometry_inputs` | CPU-Tensor `(N,F)`, vom Gradienten getrennte Kopie der Eingaben mit ursprünglichem Datentyp; keine erneute Normalisierung im Export |
+| `prediction_physical` | CPU-Tensor `float64` ohne Gradienten, `(N,S,Q,D,C)`, Vorhersage bzw. Rekonstruktion in physikalischen Einheiten |
+| `reference_physical` | CPU-Tensor `float64` ohne Gradienten, gleiche Form, rückskalierte Referenz |
+| `metrics` | Die folgenden sechs Kennzahlen, jeweils für diesen Split |
+
+`F` ist die Featurezahl, `C` die Kanalzahl; `S`, `Q`, `D` sind die Achsenlängen
+in der Reihenfolge `axis_names`. Der Export setzt keine bestimmte Rastergröße voraus.
+Die im regulären Datenfluss normalisierten Geometrieeingaben bleiben unverändert.
+Beide Kennfelder werden kanalweise mit
+`physical = normalized * data.target_denominator + data.target_minimum` rückskaliert.
+Die Skalierungsparameter selbst sind im Modellbundle, nicht in `evaluation.pt` enthalten.
+
+| Metrikschlüssel | Berechnung |
+|---|---|
+| `mse_normalized` | Mittlerer quadratischer Fehler der normalisierten Werte über alle Maschinen, Rasterpunkte und Kanäle |
+| `r2_per_channel` | Liste mit `1 - Summe((Referenz - Modellwert)²) / Summe((Referenz - Referenzmittel)²)` je Kanal, über alle Maschinen und Rasterpunkte; `None` bei konstanter Referenz |
+| `r2_mean` | Ungewichtetes Mittel aller Kanal-R²; `None`, sobald ein Kanal undefiniert ist |
+| `mae_physical_per_channel` | Liste der mittleren absoluten Fehler je Kanal, in dessen physikalischer Einheit |
+| `mse_physical_per_channel` | Liste der mittleren quadratischen Fehler je Kanal, in dessen quadrierter Einheit |
+| `points_per_channel` | Anzahl `N * S * Q * D`; die Kanalzahl wird nicht mitgezählt |
+
+Die Kanalmetriken folgen `channel_names`. R² wird aus normalisierten Werten
+berechnet; die positive affine Rückskalierung ändert es mathematisch nicht.
+Physikalische Fehler werden aus dem normalisierten Fehler mal Kanalnenner berechnet.
+
+### Prüfungen und Schreibverhalten des Auswertungsexports
+
+Der Export verlangt nichtleere Maschinensplits mit passenden Geometrie-, Kennfeld-
+und ID-Anzahlen, `F` Features und `C` Kanälen. Vorhersage und Referenz müssen die
+gleiche fünfdimensionale Form besitzen. Minimum und Nenner müssen je einen Wert
+pro Kanal enthalten, die Nenner müssen positiv sein. Geometrie, Referenz,
+Vorhersage, Skalierungswerte und rückskalierte Kennfelder werden auf endliche
+Werte geprüft. Genau drei Achsen und zu den Kennfeldern passende Achsenlängen
+sind erforderlich. Bei CNN-Sammlungen wird zuvor `model.validate_compatible(data)`
+aufgerufen.
+
+Die Auswertung läuft ohne Gradienten; Surrogat-Teilnetze werden auf `eval()`
+gesetzt. Der Dateihash wird vor und nach der Berechnung verglichen. Ändert sich
+die Modelldatei dazwischen, bricht der Export mit `RuntimeError` ab.
+Das übergebene Modellobjekt muss zur Datei gehören: `save_evaluation()` lädt die
+Datei nicht und vergleicht ihre Gewichte nicht mit dem Objekt im Arbeitsspeicher.
+
+Erst nach erfolgreicher Berechnung und Prüfung schreibt `torch.save()` eine
+temporäre Datei im Zielordner; `os.replace()` ersetzt anschließend `evaluation.pt`
+atomar. Der temporäre Pfad wird im `finally`-Block entfernt. Modell und Auswertung
+werden einzeln atomar geschrieben, nicht als gemeinsame Transaktion.
 
 ### Erneuter Diagrammexport
 

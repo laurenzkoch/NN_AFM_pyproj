@@ -4,6 +4,7 @@ import logging
 import math
 import time
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from time import perf_counter
 from types import TracebackType
@@ -17,6 +18,7 @@ from src.config.config_mcad_parameters import (
     REFERENCE_SPEED_RPM,
 )
 from src.config.config_paths import PATH_MCAD_BASEFILE, PATH_MCAD_EXE
+from src.modules.domain.reference_run import ReferenceRunResult
 from src.modules.process.motor_cad_processes.mcad_errors import (
     MCADCalculationError,
     MCADCleanupError,
@@ -25,7 +27,6 @@ from src.modules.process.motor_cad_processes.mcad_errors import (
     MCADInitializationError,
     MCADResultError,
 )
-from src.modules.simulation.reference_run import ReferenceRunResult
 
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
@@ -224,9 +225,13 @@ class MCADProcessor:
         except BaseException:
             try:
                 self.close()
-            except Exception:
+            except (
+                MCADExecutionError,
+                OSError,
+            ) as cleanup_error:
                 logger.exception(
-                    "Motor-CAD cleanup failed after context startup error."
+                    "Motor-CAD cleanup failed after context startup error: %s",
+                    cleanup_error,
                 )
             raise
 
@@ -244,9 +249,13 @@ class MCADProcessor:
 
         try:
             self.close()
-        except Exception:
+        except (
+            MCADExecutionError,
+            OSError,
+        ) as cleanup_error:
             logger.exception(
-                "Motor-CAD cleanup failed while handling another exception."
+                "Motor-CAD cleanup failed while handling another exception: %s",
+                cleanup_error,
             )
 
     def start(self) -> None:
@@ -337,7 +346,7 @@ class MCADProcessor:
         )
 
         self._call_mcad(
-            operation=(f"set_variable(name={variable_name!r}, value={value!r})"),
+            operation=f"set_variable(name={variable_name!r}, value={value!r})",
             call=lambda: self.mcad_process.set_variable(
                 variable_name,
                 value,
@@ -423,15 +432,7 @@ class MCADProcessor:
             return None, False
 
     def execute_reference_run(self) -> ReferenceRunResult | None:
-        """Run an open-circuit reference calculation for the current geometry.
-
-        The constant variable must represent the fundamental line-to-line
-        back-EMF peak divided by mechanical angular speed, in V*s/rad.
-
-        Return None for rejected geometry or a failed magnetic calculation.
-        Other errors propagate to the worker, which closes the MCAD instance.
-        """
-
+        """Return None for boundary rejection or reference calculation failure."""
         temporary_values: dict[str, float | bool] = {
             "ShaftSpeed": REFERENCE_SPEED_RPM,
             "PeakCurrent": 0.0,
@@ -446,47 +447,70 @@ class MCADProcessor:
         for name in temporary_values:
             previous_values[name] = self._call_mcad(
                 operation=f"read_reference_setting(name={name!r})",
-                call=lambda name=name: self.mcad_process.get_variable(name),
+                call=partial(
+                    self.mcad_process.get_variable,
+                    name,
+                ),
             )
 
-        for name, value in temporary_values.items():
-            self.set_value_in_mcad(name, value)
+        try:
+            for name, value in temporary_values.items():
+                self.set_value_in_mcad(name, value)
 
-        parameter_names = list(DEFAULT_VALUES)
-        parameter_values = [self.get_value_from_mcad(name) for name in parameter_names]
+            parameter_names = list(DEFAULT_VALUES)
+            parameter_values = [
+                self.get_value_from_mcad(name) for name in parameter_names
+            ]
+            design = _design_to_string(parameter_names, parameter_values)
 
-        result: ReferenceRunResult | None = None
+            if not test_boundary_conditions(parameter_names, parameter_values):
+                logger.warning(
+                    "Reference rejected: reason=boundary_check\nDesign:\n%s",
+                    design,
+                )
+                return None
 
-        geometry_is_valid = test_boundary_conditions(
-            parameter_names,
-            parameter_values,
-        )
+            try:
+                succeeded = self.do_calculation()
+            except MCADCalculationError as exc:
+                logger.warning(
+                    "Reference rejected: reason=calculation_failure "
+                    "error_type=%s detail=%s\nDesign:\n%s",
+                    type(exc).__name__,
+                    exc,
+                    design,
+                )
+                return None
 
-        if not geometry_is_valid:
-            logger.warning("Reference run rejected by boundary checks.")
-        elif not self.do_calculation():
-            logger.warning("Reference magnetic calculation failed.")
-        else:
-            result = ReferenceRunResult(
+            if not succeeded:
+                logger.warning(
+                    "Reference rejected: reason=calculation_returned_false"
+                    "\nDesign:\n%s",
+                    design,
+                )
+                return None
+
+            return ReferenceRunResult(
                 reference_speed_rpm=self.get_value_from_mcad("ShaftSpeed"),
                 back_emf_constant_ll_peak_vs_per_rad=(
                     self.get_value_from_mcad("Ke_Fundamental")
                 ),
-                peak_back_emf_phase_v=(self.get_value_from_mcad("PeakBackEMFPhase")),
+                peak_back_emf_phase_v=self.get_value_from_mcad("PeakBackEMFPhase"),
             )
 
-        for name, value in previous_values.items():
-            self._call_mcad(
-                operation=f"restore_reference_setting(name={name!r})",
-                call=lambda name=name, value=value: self.mcad_process.set_variable(
-                    name, value
-                ),
-            )
+        finally:
+            for name, value in previous_values.items():
+                self._call_mcad(
+                    operation=f"restore_reference_setting(name={name!r})",
+                    call=partial(
+                        self.mcad_process.set_variable,
+                        name,
+                        value,
+                    ),
+                )
 
-        return result
-
+    @staticmethod
     def _call_mcad(
-        self,
         operation: str,
         call: Callable[[], T],
         *,

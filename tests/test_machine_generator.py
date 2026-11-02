@@ -77,11 +77,11 @@ def test_invalid_design_counts_are_rejected(
     parameter: str,
     count: int,
 ) -> None:
-    arguments = {
+    arguments: dict[str, int] = {
         "num_base_designs": 1,
         "num_lam_designs": 1,
+        **{parameter: count},
     }
-    arguments[parameter] = count
 
     with pytest.raises(ValueError, match=parameter):
         AFMMachineGenerator(**arguments)

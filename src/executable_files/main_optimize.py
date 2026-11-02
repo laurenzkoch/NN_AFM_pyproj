@@ -10,7 +10,10 @@ import torch
 from src.config.config_logging import configure_application_logging
 from src.config.config_mcad_parameters import OUTPUT_NEURON_LIST
 from src.config.config_paths import PATH_TRAINING_DATA
-from src.modules.data_managment.experiment_utils import file_sha256
+from src.modules.data_managment.optimization_sources import (
+    discover_test_sources,
+)
+from src.modules.gui.userinterface import MyUserInterface
 from src.modules.neuronal_networks.autoencoder_collection import (
     AutoencoderCollection,
 )
@@ -67,7 +70,6 @@ class TrainingConfig(TypedDict):
 def _search_metrics(
     pipeline: OptimizationPipline,
 ) -> list[JSONValue]:
-
     entries: list[JSONValue] = []
     for result in pipeline.optimization_results:
         layers: list[JSONValue] = [value for value in result.architecture.layers]
@@ -136,31 +138,11 @@ def main() -> None:
         autoencoders = loaded_collection
         cnn_checkpoint = loaded_checkpoint
 
-    training_csv_path: Path = (PATH_TRAINING_DATA / args.csv).resolve()
-
-    test_sources: list[str] = []
-
-    for path in sorted(PATH_TRAINING_DATA.iterdir()):
-        if (
-            not path.is_file()
-            or path.suffix.lower() != ".csv"
-            or path.resolve() == training_csv_path
-        ):
-            continue
-
-        if (
-            cnn_training_source_hash is not None
-            and file_sha256(path) == cnn_training_source_hash
-        ):
-            logger.info(
-                "Excluded CNN training source from independent tests: %s",
-                path.name,
-            )
-            continue
-
-        test_sources.append(path.name)
-
-    test_filenames: tuple[str, ...] = tuple(test_sources)
+    test_filenames: tuple[str, ...] = discover_test_sources(
+        directory=PATH_TRAINING_DATA,
+        training_filename=args.csv,
+        excluded_source_hash=cnn_training_source_hash,
+    )
 
     logger.info("Training/validation source: %s", args.csv)
     logger.info("Optimization type: %s", args.network_type)
@@ -196,6 +178,7 @@ def main() -> None:
         seed=args.seed,
         worker_timeout_seconds=args.worker_timeout,
         autoencoders=autoencoders,
+        ui_factory=MyUserInterface,
         **training,
     )
 
@@ -316,12 +299,8 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 
-
 # Referenzmodell, PowerShell:
-# python -m src.executable_files.main_optimize `
-#   --csv "DEINE_DATEI.csv" `
-#   --network-type MLP --trials 40 `
-#   --max_layer 5 --max_neuron 500 --unit_step 10
+# python -m src.executable_files.main_optimize --csv "Results_EMagnetic_simulation_1_50_5_GenType-v2_30.10.2026_00-35-47_CET_a9299a86.csv" --network-type MLP --trials 100 --max_layer 5 --max_neuron 500 --unit_step 10
 
 # CNN-Sammlung, PowerShell:
 # python -m src.executable_files.main_optimize `

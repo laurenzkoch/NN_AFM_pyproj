@@ -22,10 +22,11 @@ from src.config.config_paths import (
 from src.modules.data_managment.simulation_metadata import (
     build_simulation_metadata,
 )
-from src.modules.Pipeline_and_GUI.cancellation import CancellationToken
-from src.modules.Pipeline_and_GUI.events import EventType, PipelineEvent
-from src.modules.Pipeline_and_GUI.pipeline import MyPipeline
 from src.modules.process.eduvpn import EDUVPNProcessor
+from src.modules.runtime.cancellation import CancellationToken
+from src.modules.runtime.contracts import PipelineUIFactory
+from src.modules.runtime.events import EventType, PipelineEvent
+from src.modules.runtime.pipeline import MyPipeline
 from src.modules.simulation.generators.machine_generator import AFMMachineGenerator
 from src.modules.simulation.generators.map_generator import map_generator
 from src.modules.simulation.simulation import MCADSimulation
@@ -134,6 +135,7 @@ class SimulationPipeline(MyPipeline):
         gen_type: str = "v1",
         csv_paths: Sequence[str | Path] | None = None,
         num_workers: int = 4,
+        ui_factory: PipelineUIFactory | None = None,
     ) -> None:
         combinations = self._validate_combinations(
             design_combinations,
@@ -153,6 +155,7 @@ class SimulationPipeline(MyPipeline):
         super().__init__(
             service_name="MCAD Simulation",
             num_kernel=num_workers,
+            ui_factory=ui_factory,
         )
 
         self.jobs: tuple[SimulationJob, ...] = jobs
@@ -224,9 +227,13 @@ class SimulationPipeline(MyPipeline):
             if self.eduvpn_processor is not None:
                 try:
                     self.eduvpn_processor.stop()
-                except Exception:
+                except (
+                    OSError,
+                    RuntimeError,
+                ) as cleanup_error:
                     logger.warning(
-                        "Could not stop eduVPN",
+                        "Could not stop eduVPN: %s",
+                        cleanup_error,
                         exc_info=True,
                     )
             self._close_queues()

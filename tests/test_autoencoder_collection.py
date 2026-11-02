@@ -13,9 +13,7 @@ from src.modules.neuronal_networks.autoencoder_collection import (
 from src.modules.neuronal_networks.autoencoder_collection_trainer import (
     AutoencoderCollectionTrainer,
 )
-from src.modules.neuronal_networks.manipulating_data import (
-    TrainValidationTestDataTensors,
-)
+from src.modules.neuronal_networks.data_types import TrainValidationTestDataTensors
 from src.modules.neuronal_networks.model_data_io.autoencoder_io import (
     load_autoencoders,
     save_autoencoders,

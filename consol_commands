@@ -1,6 +1,7 @@
 $files = @(
     "src",
     "tests",
+    "docs",
     "pyproject.toml",
     "pytest.ini",
     "ruff.toml",

@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 @mpl.rc_context(rc=PREDICTION_STYLE)
 def plot_prediction_results(model_folder: str | Path) -> Path:
-
     findfont(
         FontProperties(family="Arial"),
         fallback_to_default=False,

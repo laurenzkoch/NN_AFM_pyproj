@@ -20,7 +20,7 @@ from src.modules.geometry.feature_schema import MACHINE_DEFINITION
 from src.modules.neuronal_networks.autoencoder_collection import (
     AutoencoderCollection,
 )
-from src.modules.neuronal_networks.manipulating_data import (
+from src.modules.neuronal_networks.data_types import (
     TrainValidationTestDataTensors,
 )
 from src.modules.neuronal_networks.model_data_io.network_io import (
@@ -107,7 +107,6 @@ def save_bundle(
     seed: int,
     autoencoders: AutoencoderCollection | None = None,
 ) -> None:
-
     if type(seed) is not int or not 0 <= seed < 2**32:
         raise ValueError("Invalid seed.")
 
@@ -266,7 +265,6 @@ def save_bundle(
 def _validate_surrogate_metadata(
     checkpoint: SurrogateCheckpointV2,
 ) -> None:
-
     if checkpoint["feature_names"] != list(MACHINE_DEFINITION):
         raise ValueError(
             "Saved geometry features differ from the current configuration."

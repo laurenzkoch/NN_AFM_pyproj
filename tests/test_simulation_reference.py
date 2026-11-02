@@ -1,5 +1,9 @@
+import logging
+from collections.abc import Callable
 from concurrent.futures import Future
-from typing import TypedDict
+from multiprocessing.queues import Queue as ProcessQueue
+from pathlib import Path
+from typing import Protocol, TypedDict
 from unittest.mock import Mock
 
 import numpy as np
@@ -10,23 +14,47 @@ from src.config.config_mcad_parameters import (
     MCAD_RESULT_PARAMETERS,
 )
 from src.modules.data_managment.csv_io import import_data_from_csv
+from src.modules.data_managment.simulation_metadata import SimulationMetadata
+from src.modules.domain.reference_run import ReferenceRunResult
+from src.modules.runtime.events import PipelineEvent
 from src.modules.simulation import simulation as simulations
-from src.modules.simulation.reference_run import ReferenceRunResult
+from src.modules.simulation import workers
 from tests.conftest import make_frame
 
 
 class PoolSettings(TypedDict):
     failed_reference: bool
     error_stage: str | None
+    rejected_bore: float | None
+
+
+type EventQueues = tuple[
+    ProcessQueue[PipelineEvent],
+    ProcessQueue[logging.LogRecord],
+]
+
+type PoolDouble = tuple[
+    list[tuple[str, int]],
+    list[tuple[int, str, dict[str, float]]],
+    PoolSettings,
+]
+
+
+class SimulationFactory(Protocol):
+    def __call__(
+        self,
+        geometry_count: int = 1,
+    ) -> simulations.MCADSimulation: ...
 
 
 @pytest.fixture
 def simulation_factory(
-    tmp_path,
-    monkeypatch,
-    metadata,
-    event_queues,
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    metadata: SimulationMetadata,
+    event_queues: EventQueues,
+) -> SimulationFactory:
+
     monkeypatch.setattr(
         "src.modules.simulation.simulation.build_simulation_metadata",
         lambda: metadata,
@@ -38,7 +66,9 @@ def simulation_factory(
 
     progress, logs = event_queues
 
-    def create(geometry_count=1):
+    def create(
+        geometry_count: int = 1,
+    ) -> simulations.MCADSimulation:
         geometries = ({"Stator_Bore": 70.0 + index} for index in range(geometry_count))
 
         return simulations.MCADSimulation(
@@ -60,19 +90,23 @@ def simulation_factory(
 
 
 @pytest.fixture
-def pool_double(monkeypatch):
-    lifecycle = []
-    submissions = []
+def pool_double(
+    monkeypatch: pytest.MonkeyPatch,
+) -> PoolDouble:
+
+    lifecycle: list[tuple[str, int]] = []
+    submissions: list[tuple[int, str, dict[str, float]]] = []
 
     settings: PoolSettings = {
         "failed_reference": False,
         "error_stage": None,
+        "rejected_bore": None,
     }
 
     template = make_frame(1).iloc[0].to_dict()
     pool_count = 0
 
-    def create_pool(**kwargs):
+    def create_pool(**kwargs: object) -> Mock:
         nonlocal pool_count
 
         assert kwargs["max_workers"] == 2
@@ -87,33 +121,39 @@ def pool_double(monkeypatch):
         pool = Mock()
 
         def submit(
-            function,
-            parameters,
+            function: Callable[..., object],
+            parameters: dict[str, float],
             *,
             log_context: str = "",
-        ):
+        ) -> Future[object]:
+
             assert "batch=" in log_context
             assert "geometry=" in log_context
             assert "task=" in log_context
             assert function in (
-                simulations._execute_simulation,
-                simulations._execute_reference_simulation,
+                workers.execute_simulation,
+                workers.execute_reference_simulation,
             )
 
-            true_for_reference_run = (
-                function is simulations._execute_reference_simulation
-            )
+            true_for_reference_run = function is workers.execute_reference_simulation
 
             stage = "reference" if true_for_reference_run else "load"
 
             submissions.append((pool_id, stage, dict(parameters)))
 
-            future = Future()
+            future: Future[object] = Future()
 
+            # Unexpected worker errors must still abort the simulation.
             if settings["error_stage"] == stage:
                 future.set_exception(RuntimeError(f"{stage} failure"))
+
             elif true_for_reference_run:
-                if settings["failed_reference"]:
+                rejected = (
+                    settings["failed_reference"]
+                    or parameters["Stator_Bore"] == settings["rejected_bore"]
+                )
+
+                if rejected:
                     future.set_result(None)
                 else:
                     ke = 2.0 + parameters["Stator_Bore"] - 70.0
@@ -125,6 +165,7 @@ def pool_double(monkeypatch):
                             peak_back_emf_phase_v=100.0,
                         )
                     )
+
             else:
                 values = {
                     **template,
@@ -132,16 +173,15 @@ def pool_double(monkeypatch):
                 }
 
                 row = [values[name] for name in MCAD_RESULT_PARAMETERS]
-
                 future.set_result((row, True))
 
             return future
 
-        def shutdown(wait=True):
+        def shutdown(wait: bool = True) -> None:
             assert wait is True
             lifecycle.append(("closed", pool_id))
 
-        def kill_workers():
+        def kill_workers() -> None:
             lifecycle.append(("killed", pool_id))
 
         pool.submit.side_effect = submit
@@ -159,9 +199,10 @@ def pool_double(monkeypatch):
 
 
 def test_pool_restarts_after_each_geometry_batch(
-    simulation_factory,
-    pool_double,
-):
+    simulation_factory: SimulationFactory,
+    pool_double: PoolDouble,
+) -> None:
+
     lifecycle, submissions, _settings = pool_double
     instance = simulation_factory(geometry_count=5)
 
@@ -218,10 +259,11 @@ def test_pool_restarts_after_each_geometry_batch(
 
 
 def test_failed_reference_skips_its_operating_map(
-    simulation_factory,
-    pool_double,
-    event_queues,
-):
+    simulation_factory: SimulationFactory,
+    pool_double: PoolDouble,
+    event_queues: EventQueues,
+) -> None:
+
     lifecycle, submissions, settings = pool_double
     settings["failed_reference"] = True
 
@@ -249,9 +291,10 @@ def test_failed_reference_skips_its_operating_map(
 @pytest.mark.parametrize("stage", ["reference", "load"])
 def test_worker_error_kills_pool_and_stops_further_work(
     stage: str,
-    simulation_factory,
-    pool_double,
-):
+    simulation_factory: SimulationFactory,
+    pool_double: PoolDouble,
+) -> None:
+
     lifecycle, submissions, settings = pool_double
     settings["error_stage"] = stage
 
@@ -276,3 +319,74 @@ def test_worker_error_kills_pool_and_stops_further_work(
     )
 
     assert import_data_from_csv(instance.csv_path).empty
+
+
+@pytest.mark.parametrize("point_count", [2, 125])
+def test_rejected_reference_drops_map_and_continues(
+    point_count: int,
+    simulation_factory: SimulationFactory,
+    pool_double: PoolDouble,
+    event_queues: EventQueues,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    lifecycle, submissions, settings = pool_double
+    settings["rejected_bore"] = 70.0
+
+    instance = simulation_factory(geometry_count=2)
+    instance.operating_map = np.column_stack(
+        (
+            np.linspace(0.5, 1.0, point_count),
+            np.full(point_count, 3.0),
+            np.full(point_count, -4.0),
+        )
+    )
+    instance.batch_size = 2 * point_count
+
+    instance.prepare_output()
+    instance.run()
+
+    # Rejection must not kill the pool or stop the next geometry.
+    assert lifecycle == [
+        ("opened", 0),
+        ("closed", 0),
+    ]
+
+    reference_designs = [
+        parameters["Stator_Bore"]
+        for _, stage, parameters in submissions
+        if stage == "reference"
+    ]
+    assert reference_designs == [70.0, 71.0]
+
+    load_designs = [
+        parameters["Stator_Bore"]
+        for _, stage, parameters in submissions
+        if stage == "load"
+    ]
+    assert load_designs == [71.0] * point_count
+
+    frame = import_data_from_csv(instance.csv_path)
+    assert len(frame) == point_count
+    assert (frame["Stator_Bore"] == 71.0).all()
+
+    progress, _logs = event_queues
+    events = [progress.get(timeout=5) for _ in range(point_count + 1)]
+
+    dropped = [event for event in events if event.outcome == "dropped"]
+    assert len(dropped) == 1
+    assert dropped[0].increment == point_count
+
+    simulated_count = sum(
+        event.increment for event in events if event.outcome == "simulated"
+    )
+    assert simulated_count == point_count
+
+    rejection_logs = [
+        record.getMessage()
+        for record in caplog.records
+        if "Reference rejected; dropping operating map" in record.getMessage()
+    ]
+    assert len(rejection_logs) == 1
+    assert f"dropped_points={point_count}" in rejection_logs[0]
+    assert "'Stator_Bore': 70.0" in rejection_logs[0]
+    assert "geometry=" in rejection_logs[0]

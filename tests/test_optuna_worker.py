@@ -11,9 +11,7 @@ import optuna
 import pytest
 from optuna.storages import JournalStorage
 
-from src.modules.neuronal_networks.manipulating_data import (
-    TrainValidationTestDataTensors,
-)
+from src.modules.neuronal_networks.data_types import TrainValidationTestDataTensors
 from src.modules.neuronal_networks.nn_training_torch import NNTrainer
 from src.modules.neuronal_networks.optimization.journal_storage import (
     create_journal_storage,
@@ -21,8 +19,10 @@ from src.modules.neuronal_networks.optimization.journal_storage import (
 from src.modules.neuronal_networks.optimization.optimization_types import (
     NetworkSearchSpace,
 )
-from src.modules.neuronal_networks.optimization.optimizer import _optuna_worker
-from src.modules.Pipeline_and_GUI.events import EventType, PipelineEvent
+from src.modules.neuronal_networks.optimization.search_worker import (
+    optuna_worker,
+)
+from src.modules.runtime.events import EventType, PipelineEvent
 
 
 @pytest.mark.training
@@ -37,7 +37,7 @@ def test_worker_runs_requested_trials_once(
     study = optuna.create_study(
         study_name="synthetic-worker", storage=storage, direction="minimize"
     )
-    _optuna_worker(
+    optuna_worker(
         data=tensor_data,
         trainer=NNTrainer(num_epochs=2, patience=1),
         network_type="MLP",
@@ -110,7 +110,7 @@ def test_workers_share_journal(
     try:
         for worker_index in range(2):
             process: BaseProcess = context.Process(
-                target=_optuna_worker,
+                target=optuna_worker,
                 kwargs={
                     "data": tensor_data,
                     "trainer": NNTrainer(num_epochs=2, patience=1),

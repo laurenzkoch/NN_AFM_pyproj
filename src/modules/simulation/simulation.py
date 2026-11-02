@@ -14,41 +14,31 @@ from itertools import batched
 from multiprocessing.queues import Queue as ProcessQueue
 from pathlib import Path
 from time import perf_counter
-from typing import Literal, overload
 from uuid import uuid4
 
 import numpy as np
-import pandas as pd
 from numpy.typing import NDArray
 
 from src.config.config_mcad_parameters import (
-    CSV_DECIMAL_PLACES,
-    CSV_PARAMETERS,
     DEFAULT_VALUES,
     MCAD_RESULT_PARAMETERS,
     REFERENCE_CSV_PARAMETERS,
 )
 from src.config.config_paths import PATH_DATA_MCAD_RESULTS
-from src.modules.data_managment.csv_io import import_data_from_csv, write_row_in_csv
 from src.modules.data_managment.simulation_metadata import (
     build_simulation_metadata,
-    is_compatible_metadata,
-    prepare_result_csv,
-    read_metadata,
 )
-from src.modules.Pipeline_and_GUI.cancellation import CancellationToken
-from src.modules.Pipeline_and_GUI.events import EventType, PipelineEvent
+from src.modules.domain.reference_run import ReferenceRunResult
 from src.modules.process.motor_cad_processes import mcad_instance_handling
 from src.modules.process.motor_cad_processes.mcad_errors import (
     MCADResultError,
 )
-from src.modules.process.motor_cad_processes.mcad_processing import MCADProcessor
-from src.modules.simulation.reference_run import ReferenceRunResult
+from src.modules.runtime.cancellation import CancellationToken
+from src.modules.runtime.events import EventType, PipelineEvent
+from src.modules.simulation import workers
+from src.modules.simulation.result_cache import ResultCache
 
 logger = logging.getLogger(__name__)
-
-type KnownPoint = tuple[int | float, ...]
-type KnownPointsBySource = dict[str, set[KnownPoint]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,7 +56,7 @@ class OperatingPoint:
             "ReferenceKeFundamental": (
                 self.reference.back_emf_constant_ll_peak_vs_per_rad
             ),
-            "ReferencePeakBackEMFPhase": (self.reference.peak_back_emf_phase_v),
+            "ReferencePeakBackEMFPhase": self.reference.peak_back_emf_phase_v,
             "BaseSpeedRPM": self.base_speed_rpm,
             "ShaftSpeedNorm": self.shaft_speed_norm,
         }
@@ -81,137 +71,6 @@ class PendingRequest:
     count: int = 1
     log_context: str = ""
     submitted_at: float = field(default_factory=perf_counter)
-
-
-def _set_mcad_parameters(
-    mcad: MCADProcessor,
-    parameters: dict[str, float],
-) -> None:
-    for name, value in parameters.items():
-        if isinstance(value, np.generic):
-            value = value.item()
-
-        if name == "Pole_Number":
-            points_per_cycle = mcad.get_value_from_mcad("TorquePointsPerCycle")
-            mesh_points = value / 2 * points_per_cycle
-
-            if mesh_points < 360:
-                mesh_points *= 4
-
-            mcad.set_value_in_mcad(
-                "AirgapMeshPoints_mesh",
-                mesh_points,
-            )
-            mcad.set_value_in_mcad(
-                "AirgapMeshPoints_layers",
-                mesh_points,
-            )
-
-        mcad.set_value_in_mcad(name, value)
-
-
-@overload
-def _execute_simulation(
-    parameter_dict: dict[str, float],
-    true_for_reference_run: Literal[False] = False,
-    *,
-    log_context: str = "",
-) -> tuple[list[float] | None, bool]: ...
-
-
-@overload
-def _execute_simulation(
-    parameter_dict: dict[str, float],
-    true_for_reference_run: Literal[True],
-    *,
-    log_context: str = "",
-) -> ReferenceRunResult | None: ...
-
-
-def _execute_simulation(
-    parameter_dict: dict[str, float],
-    true_for_reference_run: bool = False,
-    *,
-    log_context: str = "",
-) -> tuple[list[float] | None, bool] | ReferenceRunResult | None:
-
-    context = log_context or f"task={uuid4().hex[:12]}"
-    kind = "reference" if true_for_reference_run else "load"
-    phase = "instance_lookup"
-    started = perf_counter()
-
-    logger.info(
-        "Worker task started: %s kind=%s",
-        context,
-        kind,
-    )
-    logger.debug(
-        "Worker task parameters: %s parameters=%r",
-        context,
-        parameter_dict,
-    )
-
-    try:
-        mcad = mcad_instance_handling.get_mcad_instance()
-
-        phase = "parameter_assignment"
-        _set_mcad_parameters(mcad, parameter_dict)
-
-        phase = f"{kind}_calculation"
-
-        result: tuple[list[float] | None, bool] | ReferenceRunResult | None
-
-        if true_for_reference_run:
-            result = mcad.execute_reference_run()
-            outcome = "rejected" if result is None else "completed"
-        else:
-            result = mcad.execute_mcad_simulation()
-            outcome = "completed" if result[1] else "rejected"
-
-        logger.info(
-            "Worker task finished: %s kind=%s outcome=%s elapsed_s=%.3f",
-            context,
-            kind,
-            outcome,
-            perf_counter() - started,
-        )
-
-        return result
-
-    except BaseException as exc:
-        logger.error(
-            "Worker task failed: "
-            "%s kind=%s phase=%s elapsed_s=%.3f "
-            "error_type=%s detail=%s",
-            context,
-            kind,
-            phase,
-            perf_counter() - started,
-            type(exc).__name__,
-            exc,
-        )
-
-        try:
-            mcad_instance_handling.shutdown_mcad_instance()
-        except Exception:
-            logger.exception(
-                "Unexpected worker cleanup error: %s",
-                context,
-            )
-
-        raise
-
-
-def _execute_reference_simulation(
-    parameter_dict: dict[str, float],
-    *,
-    log_context: str = "",
-) -> ReferenceRunResult | None:
-    return _execute_simulation(
-        parameter_dict,
-        true_for_reference_run=True,
-        log_context=log_context,
-    )
 
 
 class MCADSimulation:
@@ -274,15 +133,15 @@ class MCADSimulation:
         )
 
         self.expected_metadata = build_simulation_metadata()
-        self.dataframes: dict[str, pd.DataFrame] = self._get_csv_files()
 
-        self._known_points_cache: dict[
-            tuple[str, ...],
-            KnownPointsBySource,
-        ] = {}
+        self.result_cache = ResultCache(
+            csv_path=self.csv_path,
+            expected_metadata=self.expected_metadata,
+            cache_directory=PATH_DATA_MCAD_RESULTS,
+        )
 
     def prepare_output(self) -> None:
-        prepare_result_csv(self.csv_path, self.expected_metadata)
+        self.result_cache.prepare_output()
 
     def run(self) -> None:
         self.cancellation.raise_if_requested()
@@ -375,7 +234,7 @@ class MCADSimulation:
                 )
 
                 reference_future = executor.submit(
-                    _execute_reference_simulation,
+                    workers.execute_reference_simulation,
                     reference_parameters,
                     log_context=reference_context,
                 )
@@ -384,15 +243,20 @@ class MCADSimulation:
                 reference = self._wait_for_reference(reference_future)
 
                 if reference is None:
+                    dropped_points = len(self.operating_map)
+
                     logger.warning(
-                        "Reference rejected; skipping operating map: %s load_points=%d",
-                        geometry_context,
-                        len(self.operating_map),
+                        "Reference rejected; dropping operating map and "
+                        "continuing with next geometry: "
+                        "%s dropped_points=%d reference_parameters=%r",
+                        reference_context,
+                        dropped_points,
+                        reference_parameters,
                     )
 
                     self._report_progress(
                         "dropped",
-                        len(self.operating_map),
+                        dropped_points,
                     )
                     continue
 
@@ -578,7 +442,7 @@ class MCADSimulation:
                 **operating_point.csv_reference_values(),
             }
 
-            known = self._find_known_result(lookup_parameters)
+            known = self.result_cache.find_known_result(lookup_parameters)
 
             if known is not None:
                 source, row_index = known
@@ -593,13 +457,11 @@ class MCADSimulation:
                 if source == self.csv_path.resolve().as_posix():
                     self._report_progress("existing")
                 else:
-                    row = (
-                        self.dataframes[source]
-                        .iloc[row_index][CSV_PARAMETERS]
-                        .to_numpy(dtype=float)
-                        .tolist()
+                    row = self.result_cache.get_row(
+                        source,
+                        row_index,
                     )
-                    self._append_result(row)
+                    self.result_cache.append_result(row)
                     self._report_progress("copied")
 
                 continue
@@ -645,7 +507,7 @@ class MCADSimulation:
             )
 
             future = executor.submit(
-                _execute_simulation,
+                workers.execute_simulation,
                 parameters,
                 log_context=task_context,
             )
@@ -726,7 +588,7 @@ class MCADSimulation:
                 ]
 
                 try:
-                    self._append_result(csv_row)
+                    self.result_cache.append_result(csv_row)
                 except Exception:
                     logger.exception(
                         "Could not store load result: %s csv=%s",
@@ -759,10 +621,14 @@ class MCADSimulation:
 
         try:
             executor.kill_workers()
-        except Exception:
+        except (
+            OSError,
+            RuntimeError,
+        ) as cleanup_error:
             logger.exception(
-                "Process pool termination failed: %s",
+                "Process pool termination failed: %s detail=%s",
                 log_context,
+                cleanup_error,
             )
         else:
             logger.info(
@@ -770,115 +636,6 @@ class MCADSimulation:
                 log_context,
                 perf_counter() - started,
             )
-
-    def _get_csv_files(self) -> dict[str, pd.DataFrame]:
-        result = {}
-        csv_paths: set[Path] = {
-            path.resolve() for path in PATH_DATA_MCAD_RESULTS.glob("*.csv")
-        }
-
-        if self.csv_path.is_file():
-            csv_paths.add(self.csv_path.resolve())
-
-        for path in sorted(csv_paths):
-            try:
-                document = read_metadata(path)
-                if not is_compatible_metadata(document, self.expected_metadata):
-                    logger.info("Skip incompatible simulation setup: %s", path.name)
-                    continue
-                frame = import_data_from_csv(path)
-                if list(frame.columns) != CSV_PARAMETERS:
-                    raise ValueError("CSV schema/order differs")
-                numeric = frame[CSV_PARAMETERS].to_numpy(dtype=float)
-                if not np.isfinite(numeric).all():
-                    raise ValueError("CSV contains nonfinite values")
-            except (OSError, ValueError, KeyError) as exc:
-                logger.warning("Skip channel_result source %s: %s", path.name, exc)
-                continue
-            result[path.resolve().as_posix()] = frame.reset_index(drop=True)
-        return result
-
-    def _get_cached_known_points(
-        self,
-        parameter_list: list[str],
-    ) -> KnownPointsBySource:
-        schema = tuple(parameter_list)
-
-        if schema not in self._known_points_cache:
-            self._known_points_cache[schema] = self._get_all_known_points(
-                parameter_list
-            )
-
-        return self._known_points_cache[schema]
-
-    @staticmethod
-    def _get_known_points(
-        dataframe: pd.DataFrame,
-        parameter_list: list[str],
-    ) -> set[KnownPoint]:
-        known_points = {
-            tuple(row)
-            for row in dataframe[parameter_list].itertuples(
-                index=True,
-                name=None,
-            )
-        }
-        return known_points
-
-    def _get_all_known_points(self, parameter_list: list[str]) -> KnownPointsBySource:
-        known_points: KnownPointsBySource = {}
-        for key_csv_path, value_dataframe in self.dataframes.items():
-            known_points[key_csv_path] = self._get_known_points(
-                value_dataframe, parameter_list
-            )
-        return known_points
-
-    def _find_known_result(
-        self,
-        parameters: dict[str, float],
-    ) -> tuple[str, int] | None:
-        schema = tuple(parameters)
-        target = np.asarray(tuple(parameters.values()), dtype=float)
-        if not np.isfinite(target).all():
-            raise ValueError("Nonfinite simulation parameters")
-        known = self._get_cached_known_points(list(schema))
-        order = sorted(
-            known, key=lambda key: (key != self.csv_path.resolve().as_posix(), key)
-        )
-        for source in order:
-            for record in sorted(known[source], key=lambda row: row[0]):
-                candidate = np.asarray(record[1:], dtype=float)
-                if np.allclose(
-                    candidate,
-                    target,
-                    rtol=1e-10,
-                    atol=1e-9,
-                ):
-                    return source, int(record[0])
-        return None
-
-    def _append_result(self, values_row: list[float]) -> None:
-        if len(values_row) != len(CSV_PARAMETERS):
-            raise ValueError("Wrong channel_result width")
-        values = [
-            float(f"{float(value):.{CSV_DECIMAL_PLACES}f}") for value in values_row
-        ]
-        if not np.isfinite(values).all():
-            raise ValueError("Nonfinite simulation channel_result")
-        write_row_in_csv(self.csv_path, values)
-        key = self.csv_path.resolve().as_posix()
-        current = self.dataframes.get(key)
-        row_index = 0 if current is None else len(current)
-        added = pd.DataFrame([values], columns=CSV_PARAMETERS)
-        self.dataframes[key] = (
-            added
-            if current is None or current.empty
-            else pd.concat([current, added], ignore_index=True)
-        )
-        row = dict(zip(CSV_PARAMETERS, values, strict=True))
-        for schema, sources in self._known_points_cache.items():
-            record = (row_index, *(row[name] for name in schema))
-            sources.setdefault(key, set()).add(record)
 
     def _report_progress(
         self,

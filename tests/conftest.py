@@ -16,7 +16,10 @@ import pytest
 import torch
 
 
-def _forbid_external_start(*args: object, **kwargs: object) -> NoReturn:
+def _forbid_external_start(
+    *_args: object,
+    **_kwargs: object,
+) -> NoReturn:
     raise AssertionError("Automatische Tests dürfen MotorCAD/Tk nicht starten.")
 
 
@@ -64,23 +67,25 @@ from src.config.config_mcad_parameters import (  # noqa: E402
     REFERENCE_SPEED_RPM,
 )
 from src.modules.data_managment.experiment_utils import canonical_hash  # noqa: E402
+from src.modules.data_managment.map_grid import MapGrid  # noqa: E402
 from src.modules.data_managment.simulation_metadata import (  # noqa: E402
     SimulationMetadata,
     SimulationPayload,
+    write_metadata,
 )
 from src.modules.geometry.feature_schema import MACHINE_DEFINITION  # noqa: E402
-from src.modules.neuronal_networks.manipulating_data import (  # noqa: E402
-    DataLoader,
+from src.modules.neuronal_networks.data_types import (  # noqa: E402
     MachineDataTensor,
     TrainValidationTestDataTensors,
 )
-from src.modules.Pipeline_and_GUI.events import PipelineEvent  # noqa: E402
+from src.modules.neuronal_networks.manipulating_data import DataLoader  # noqa E402
+from src.modules.runtime.events import PipelineEvent  # noqa: E402
 
 
-@pytest.fixture
-def metadata() -> SimulationMetadata:
+def make_metadata() -> SimulationMetadata:
     payload: SimulationPayload = {
-        "metadata_version": 3,
+        "metadata_version": 4,
+        "map_grid": MapGrid.from_config().to_payload(),
         "base_model_sha256": "1" * 64,
         "mcad_executable_sha256": "2" * 64,
         "integration_version": "synthetic-test",
@@ -88,7 +93,7 @@ def metadata() -> SimulationMetadata:
         "external_dependency_hashes": {},
         "csv_columns": list(CSV_PARAMETERS),
         "float_decimal_places": CSV_DECIMAL_PLACES,
-        "speed_normalization": ("shaft_speed_rpm / base_speed_rpm"),
+        "speed_normalization": "shaft_speed_rpm / base_speed_rpm",
         "reference_speed_rpm": REFERENCE_SPEED_RPM,
         "reference_current_a": 0.0,
         "back_emf_constant_definition": (
@@ -100,6 +105,11 @@ def metadata() -> SimulationMetadata:
         "fingerprint": canonical_hash(payload),
         "payload": payload,
     }
+
+
+@pytest.fixture
+def metadata() -> SimulationMetadata:
+    return make_metadata()
 
 
 @pytest.fixture
@@ -193,7 +203,13 @@ def make_frame(
 
 
 def write_frame(path: Path, frame: pd.DataFrame) -> None:
-    frame.to_csv(path, sep=";", decimal=",", index=False)
+    frame.to_csv(
+        path,
+        sep=";",
+        decimal=",",
+        index=False,
+    )
+    write_metadata(path, make_metadata())
 
 
 @pytest.fixture

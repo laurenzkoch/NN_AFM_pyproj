@@ -24,10 +24,15 @@ from src.config.config_paths import (
 )
 from src.modules.data_managment.csv_io import import_data_from_csv
 from src.modules.data_managment.experiment_utils import canonical_hash, file_sha256
+from src.modules.data_managment.map_grid import (
+    MapGrid,
+    MapGridPayload,
+)
 
 
 class SimulationPayload(TypedDict):
     metadata_version: int
+    map_grid: MapGridPayload
     base_model_sha256: str
     mcad_executable_sha256: str
     integration_version: str
@@ -66,9 +71,15 @@ def is_compatible_metadata(
     expected: SimulationMetadata,
 ) -> bool:
     if (
-        actual["payload"].get("metadata_version") != 3
-        or expected["payload"].get("metadata_version") != 3
+        actual["payload"].get("metadata_version") != 4
+        or expected["payload"].get("metadata_version") != 4
     ):
+        return False
+
+    try:
+        MapGrid.from_payload(actual["payload"].get("map_grid"))
+        MapGrid.from_payload(expected["payload"].get("map_grid"))
+    except ValueError:
         return False
 
     if actual["payload"] != expected["payload"]:
@@ -86,7 +97,8 @@ def metadata_path(csv_path: str | Path) -> Path:
 
 def build_simulation_metadata() -> SimulationMetadata:
     payload: SimulationPayload = {
-        "metadata_version": 3,
+        "metadata_version": 4,
+        "map_grid": MapGrid.from_config().to_payload(),
         "base_model_sha256": file_sha256(PATH_MCAD_BASEFILE),
         "mcad_executable_sha256": file_sha256(PATH_MCAD_EXE),
         "integration_version": version("ansys-motorcad-core"),
@@ -150,6 +162,9 @@ def read_metadata(csv_path: Path) -> SimulationMetadata:
 
     if document["fingerprint"] != canonical_hash(document["payload"]):
         raise ValueError("The metadata fingerprint is incorrect.")
+
+    if document["payload"].get("metadata_version") == 4:
+        MapGrid.from_payload(document["payload"].get("map_grid"))
 
     if "adoption" in raw:
         adoption = raw["adoption"]
@@ -300,22 +315,18 @@ def migrate_simulation_metadata(
         not is_compatible_metadata(expected, expected)
         or "implementation_hashes" in expected["payload"]
     ):
-        raise ValueError("Expected metadata must use the new version 3 format.")
+        raise ValueError("Expected metadata must use the new version 4 format.")
 
     sidecar: Path = metadata_path(csv_path)
     original_sidecar: bytes = sidecar.read_bytes()
     original_csv_hash: str = file_sha256(csv_path)
 
-    # Prüft den bisherigen Fingerprint und bei adoptierten Dateien
-    # zusätzlich den bereits gespeicherten CSV-Hash.
     actual: SimulationMetadata = read_metadata(csv_path)
-
-    # Prüft Spaltenreihenfolge und endliche Ergebniswerte.
-    validate_result_csv(csv_path)
+    frame = validate_result_csv(csv_path)
 
     previous_version: object = actual["payload"].get("metadata_version")
 
-    if type(previous_version) is not int or previous_version not in (1, 2, 3):
+    if type(previous_version) is not int or previous_version not in (1, 2, 3, 4):
         raise ValueError("Unsupported metadata version.")
 
     previous_setup: dict[str, object] = {
@@ -331,7 +342,12 @@ def migrate_simulation_metadata(
         if not isinstance(implementation_hashes, dict):
             raise ValueError("Version 1 implementation hashes are missing.")
 
-        previous_setup["metadata_version"] = 2
+    if previous_version < 4:
+        grid = MapGrid.from_payload(expected["payload"]["map_grid"])
+        grid.validate_frame(frame)
+
+        previous_setup["metadata_version"] = 4
+        previous_setup["map_grid"] = grid.to_payload()
 
     if previous_setup != expected["payload"]:
         raise ValueError(
@@ -353,3 +369,45 @@ def migrate_simulation_metadata(
         write_metadata(csv_path, migrated)
 
     return migrated
+
+
+def upgrade_grid_metadata(
+    csv_path: Path,
+    grid: MapGrid,
+    *,
+    write: bool = False,
+) -> SimulationMetadata:
+    """Add a CSV-verified grid while preserving the recorded setup."""
+    sidecar = metadata_path(csv_path)
+
+    original_sidecar = sidecar.read_bytes()
+    original_csv_hash = file_sha256(csv_path)
+
+    actual = read_metadata(csv_path)
+    previous_version = actual["payload"].get("metadata_version")
+
+    if previous_version not in (3, 4):
+        raise ValueError("Grid upgrade supports metadata versions 3 and 4 only.")
+
+    if previous_version == 4 and actual["payload"].get("map_grid") != grid.to_payload():
+        raise ValueError("Existing map_grid differs; metadata was not changed.")
+
+    frame = validate_result_csv(csv_path)
+    grid.validate_frame(frame)
+
+    upgraded: SimulationMetadata = deepcopy(actual)
+    upgraded["payload"]["metadata_version"] = 4
+    upgraded["payload"]["map_grid"] = grid.to_payload()
+
+    upgraded["fingerprint"] = canonical_hash(upgraded["payload"])
+
+    if (
+        file_sha256(csv_path) != original_csv_hash
+        or sidecar.read_bytes() != original_sidecar
+    ):
+        raise ValueError("Source changed during grid upgrade.")
+
+    if write and upgraded != actual:
+        write_metadata(csv_path, upgraded)
+
+    return upgraded

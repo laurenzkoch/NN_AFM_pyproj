@@ -84,6 +84,13 @@ class MyUserInterface:
     ) -> None:
         self.root.destroy()
 
+    def schedule(
+        self,
+        delay_ms: int,
+        callback: Callable[[], None],
+    ) -> None:
+        self.root.after(delay_ms, callback)
+
     def run_ui(self) -> None:
         self.root.mainloop()
 
@@ -111,7 +118,7 @@ class MyUserInterface:
             and self.overall_progressbar is not None
         ):
             self.overall_value_label.config(
-                text=(f"Files: {overall_value} from {self.overall_max_value}")
+                text=f"Files: {overall_value} from {self.overall_max_value}"
             )
             self.overall_progressbar["value"] = overall_value
 

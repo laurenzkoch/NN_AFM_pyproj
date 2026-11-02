@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 
@@ -7,18 +5,26 @@ from src.config.config_mcad_parameters import (
     AXIS_LIST,
     CSV_DECIMAL_PLACES,
 )
-from src.modules.neuronal_networks.manipulating_data import DataLoader
+from src.modules.data_managment.grid_alignment import GridAligner
+from src.modules.data_managment.map_grid import MapGrid
+
+
+def make_aligner() -> GridAligner:
+    return GridAligner(
+        map_axes=MapGrid.from_config().axes(),
+        csv_decimal_places=CSV_DECIMAL_PLACES,
+    )
 
 
 def rounded(value: float) -> float:
     return float(f"{value:.{CSV_DECIMAL_PLACES}f}")
 
 
-def test_speed_grid_corrects_csv_rounding(tmp_path: Path) -> None:
-    loader = DataLoader(tmp_path)
+def test_speed_grid_corrects_csv_rounding() -> None:
+    aligner = make_aligner()
     axis_name = AXIS_LIST[0]
 
-    loader.map_axes[axis_name] = np.array([0.0, 10.0, 20.0])
+    aligner.map_axes[axis_name] = np.array([0.0, 10.0, 20.0])
 
     base_speed = 123.4567890123456
     shaft_speed = 10.0 * base_speed
@@ -36,7 +42,7 @@ def test_speed_grid_corrects_csv_rounding(tmp_path: Path) -> None:
     stored_speed = df["ShaftSpeed"].iloc[0]
     stored_base_speed = df["BaseSpeedRPM"].iloc[0]
 
-    result = loader._align_speed_grid(df)
+    result = aligner.align_speed_grid(df)
 
     assert result[axis_name].iloc[0] == 10.0
     assert result["ShaftSpeed"].iloc[0] == stored_speed
@@ -44,11 +50,11 @@ def test_speed_grid_corrects_csv_rounding(tmp_path: Path) -> None:
     assert result.index.tolist() == [42]
 
 
-def test_speed_grid_preserves_off_grid_value(tmp_path: Path) -> None:
-    loader = DataLoader(tmp_path)
+def test_speed_grid_preserves_off_grid_value() -> None:
+    aligner = make_aligner()
     axis_name = AXIS_LIST[0]
 
-    loader.map_axes[axis_name] = np.array([0.0, 10.0, 20.0])
+    aligner.map_axes[axis_name] = np.array([0.0, 10.0, 20.0])
 
     df = pd.DataFrame(
         {
@@ -59,20 +65,20 @@ def test_speed_grid_preserves_off_grid_value(tmp_path: Path) -> None:
 
     df[axis_name] = df["ShaftSpeed"] / df["BaseSpeedRPM"]
 
-    result = loader._align_speed_grid(df)
+    result = aligner.align_speed_grid(df)
 
     assert result[axis_name].iloc[0] == 11.0
 
 
-def test_axis_grid_preserves_ambiguous_value(tmp_path: Path) -> None:
-    loader = DataLoader(tmp_path)
+def test_axis_grid_preserves_ambiguous_value() -> None:
+    aligner = make_aligner()
     axis_name = AXIS_LIST[0]
 
-    loader.map_axes[axis_name] = np.array([10.0, 20.0])
+    aligner.map_axes[axis_name] = np.array([10.0, 20.0])
 
     df = pd.DataFrame({axis_name: [15.0]}, index=[42])
 
-    loader._align_axis_grid(
+    aligner.align_axis_grid(
         df=df,
         axis_name=axis_name,
         possible_values=np.array([[9.0, 21.0]]),
@@ -82,13 +88,11 @@ def test_axis_grid_preserves_ambiguous_value(tmp_path: Path) -> None:
     assert df[axis_name].iloc[0] == 15.0
 
 
-def test_current_density_grid_corrects_csv_rounding(
-    tmp_path: Path,
-) -> None:
-    loader = DataLoader(tmp_path)
+def test_current_density_grid_corrects_csv_rounding() -> None:
+    aligner = make_aligner()
 
-    loader.map_axes[AXIS_LIST[1]] = np.array([0.0, 5.0, 10.0])
-    loader.map_axes[AXIS_LIST[2]] = np.array([-5.0, 0.0, 5.0])
+    aligner.map_axes[AXIS_LIST[1]] = np.array([0.0, 5.0, 10.0])
+    aligner.map_axes[AXIS_LIST[2]] = np.array([-5.0, 0.0, 5.0])
 
     df = pd.DataFrame(
         {
@@ -105,7 +109,7 @@ def test_current_density_grid_corrects_csv_rounding(
     df[AXIS_LIST[1]] = df["RMSPhaseCurrent_Q"] / conductor_area
     df[AXIS_LIST[2]] = df["RMSPhaseCurrent_D"] / conductor_area
 
-    result = loader._align_current_density_grid(df)
+    result = aligner.align_current_density_grid(df)
 
     assert result[AXIS_LIST[1]].iloc[0] == 10.0
     assert result[AXIS_LIST[2]].iloc[0] == -5.0

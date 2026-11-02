@@ -1,6 +1,7 @@
 # Projektworkflow
 
 Stand: 28.10.2026, mit dem vorhandenen Quellcode abgeglichen.
+Auswertungsexport in Abschnitt 6: am 02.11.2026 mit `evaluation_io.py` abgeglichen.
 
 Dieses Dokument beschreibt die Verarbeitung und ihre fachlichen Grenzen.
 Installation, aktuelle CLI-Optionen und konfigurierte Zahlenwerte stehen in der
@@ -243,6 +244,28 @@ Anschließend führt `main_optimize` aus:
 3. `evaluation.pt` mit Referenzen, Vorhersagen/Rekonstruktionen und Metriken schreiben.
 4. Sieben PNGs, sieben Einzel-PDFs und den einseitigen PDF-Bericht erzeugen.
 
+Schritt 3 verwendet `save_evaluation(model_path, model, data)` aus
+[evaluation_io.py](../src/modules/neuronal_networks/model_data_io/evaluation_io.py).
+Für Referenz-/Kombimodelle wird `model.get_prediction(data.geometry_tensor)` je
+Split ausgewertet (`evaluation_kind="prediction"`). Für CNN-Sammlungen wird
+`model.reconstruct(data.map_tensor)` verwendet (`evaluation_kind="reconstruction"`);
+Geometrien werden dabei nur zur Zuordnung gespeichert. Die Sammlung prüft zuvor
+die Kompatibilität der Daten.
+
+Training und Validierung sind immer enthalten. Ohne Testdaten wird kein
+`test`-Eintrag geschrieben. Der Export speichert vollständige Kennfelder als
+CPU-`float64` ohne Gradienten und skaliert sie mit den kanalweisen Minima und
+Nennern aus `data` in physikalische Einheiten zurück. Die Geometrieeingaben werden
+als CPU-Kopie übernommen, ohne sie erneut zu normalisieren. Formen, ID-Anzahlen,
+endliche Werte, positive Nenner und Achsenlängen werden geprüft.
+
+Die Modelldatei muss bereits existieren und zum übergebenen Modellobjekt gehören.
+Der SHA-256-Vergleich vor und nach der Auswertung erkennt eine zwischenzeitliche
+Dateiänderung; ein Gewichtsvergleich zwischen Datei und Modellobjekt ist nicht
+Teil dieses Exports. Erst nach den Prüfungen wird eine temporäre Datei geschrieben
+und atomar durch `evaluation.pt` ersetzt. Ein erneuter Export im selben Modellordner
+überschreibt die bisherige Auswertung.
+
 Modellkategorien, Formate, Hashbindung und Exportgrenzen stehen in der
 [Artefaktreferenz](DATEIEN_UND_SPEICHERORTE.md). Scheitert ein späterer Plotexport,
 können Modell und Auswertung bereits vollständig vorliegen. Erneutes Plotten
@@ -256,6 +279,9 @@ Gesamt-R². Die Auswertung umfasst außerdem normalisierten Gesamt-MSE und
 physikalischen MAE/MSE je Kanal. Fehler verschiedener Einheiten werden nicht
 zu einem physikalischen Gesamtfehler vermischt. Kombimodelle werden abschließend
 auf vollständigen Kennfeldern bewertet, trotz spärlicher Trainingsstützstellen.
+`points_per_channel` zählt je Split alle Maschinen mal alle Rasterpunkte,
+ohne Multiplikation mit der Kanalzahl. Feldnamen und genaue Metrikdefinitionen
+stehen in der [Artefaktreferenz](DATEIEN_UND_SPEICHERORTE.md#feldschema-von-evaluationpt).
 
 ## 7. Gespeicherte Modelle anwenden
 

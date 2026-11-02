@@ -8,7 +8,7 @@ from src.config.config_mcad_parameters import (
 from src.modules.neuronal_networks.autoencoder_collection import (
     AutoencoderCollection,
 )
-from src.modules.neuronal_networks.manipulating_data import (
+from src.modules.neuronal_networks.data_types import (
     TrainValidationTestDataTensors,
 )
 from src.modules.neuronal_networks.nn_training_torch import NNTrainer

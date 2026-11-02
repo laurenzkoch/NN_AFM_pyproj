@@ -1,6 +1,7 @@
 # Automatische Tests und Prüfnachweise
 
 Stand: 28.10.2026, statischer Abgleich mit den vorhandenen Testdateien.
+Auswertungsexport: ergänzender statischer Abgleich am 02.11.2026 (Abschnitt 2.1).
 
 Die Tests verwenden echten Projektcode für Datenaufbereitung, Metriken, Modelle,
 Training, Optuna-Journals, Simulationssteuerung und Logging. Motor-CAD-Start und
@@ -60,6 +61,38 @@ Dateipfade beziehen sich auf [tests](../tests).
 
 Die Matrix beschreibt Testcode, keinen in dieser Änderung ausgeführten erfolgreichen
 Testlauf und keinen Coverage-Prozentsatz.
+
+### 2.1 Testabdeckung von `evaluation_io.py`
+
+Der ergänzende Abgleich bezieht sich auf
+[evaluation_io.py](../src/modules/neuronal_networks/model_data_io/evaluation_io.py)
+und die vorhandenen Exporttests:
+
+- `test_models.py` prüft den Surrogatexport mit und ohne Testdaten: Format 2,
+  `evaluation_kind="prediction"`, physikalische Werteskala, Modellname/-hash,
+  Feature-/Kanalnamen, Achsen, Quellenhashes und die vorhandenen Splits.
+  Je Split werden Maschinen-IDs, Geometrien und rückskalierte Kennfelder geprüft;
+  die Metriken werden gegen `evaluate_surrogate()` verglichen. Die Tensoren liegen auf CPU ohne
+  Gradienten; im Zielordner verbleiben nur Modell und Auswertung.
+- `test_autoencoder_collection.py` prüft im Sammlungs-Roundtrip zusätzlich den
+  Auswertungsexport mit `evaluation_kind="reconstruction"`, Kanalnamen und
+  Modellbindung. Der Modellhash bleibt unverändert, es bleiben keine temporären
+  Exportdateien im Zielordner zurück.
+
+Diese Tests decken erfolgreiche Exporte ab. Eigene Fehlerfalltests für fehlende
+Modelldateien, den Zielpfadkonflikt `model_path.name == "evaluation.pt"`, ungültige
+Tensorformen/ID-Anzahlen, nicht endliche Werte, ungültige Skalierungsnenner und
+unpassende Achsenlängen sind im abgeglichenen Exporttestcode nicht vorhanden.
+Auch die Erkennung einer während der Auswertung veränderten Modelldatei sowie
+Schreibfehler und der Erhalt einer bestehenden Auswertung bei fehlgeschlagenem
+Export werden dort nicht gezielt getestet. Ein erfolgreicher Exporttest allein
+belegt diese Fehlerpfade nicht.
+
+Für diese Ergänzung wurden Quellcode, Testassertionen und Dokumentationsverweise
+statisch geprüft; kein pytest-, Trainings-, Plot- oder Motor-CAD-Lauf wurde gestartet.
+Die übrige Testmatrix und deren Projektbefunde behalten ihren oben genannten
+Abgleichstand. Das genaue Dateischema steht in der
+[Artefaktreferenz](DATEIEN_UND_SPEICHERORTE.md#feldschema-von-evaluationpt).
 
 ## 3. Marker und gezielte Auswahl
 

@@ -12,10 +12,10 @@ import pytest
 
 from src.config.config_mcad_parameters import MAP_SIZE
 from src.modules.data_managment.simulation_metadata import SimulationMetadata
-from src.modules.Pipeline_and_GUI.events import EventType, PipelineEvent
+from src.modules.domain.reference_run import ReferenceRunResult
+from src.modules.runtime.events import EventType, PipelineEvent
 from src.modules.simulation import sim_pipeline as pipelines
 from src.modules.simulation import simulation as simulations
-from src.modules.simulation.reference_run import ReferenceRunResult
 
 type EventQueues = tuple[ProcessQueue[PipelineEvent], ProcessQueue[logging.LogRecord]]
 
@@ -248,4 +248,4 @@ def test_failed_future_propagates_and_reports_no_success(
         instance._collect_results([request])
 
     assert captured.value is error
-    assert instance.dataframes == {}
+    assert instance.result_cache.dataframes == {}

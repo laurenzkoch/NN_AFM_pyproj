@@ -9,21 +9,20 @@ import numpy as np
 import pytest
 
 from src.modules.data_managment.simulation_metadata import SimulationMetadata
-from src.modules.neuronal_networks.manipulating_data import (
-    TrainValidationTestDataTensors,
-)
+from src.modules.domain.reference_run import ReferenceRunResult
+from src.modules.neuronal_networks.data_types import TrainValidationTestDataTensors
 from src.modules.neuronal_networks.nn_training_torch import NNTrainer
 from src.modules.neuronal_networks.optimization.optimization_types import (
     NetworkSearchSpace,
 )
 from src.modules.neuronal_networks.optimization.optimizer import NNOptimizer
-from src.modules.Pipeline_and_GUI.cancellation import (
+from src.modules.runtime.cancellation import (
     CancellationToken,
     PipelineCancelledError,
 )
-from src.modules.Pipeline_and_GUI.events import PipelineEvent
+from src.modules.runtime.events import PipelineEvent
 from src.modules.simulation import simulation as simulations
-from src.modules.simulation.reference_run import ReferenceRunResult
+from src.modules.simulation import workers
 
 type WorkerResult = tuple[list[float] | None, bool] | ReferenceRunResult | None
 
@@ -88,13 +87,11 @@ def test_simulation_cancellation_kills_pool_and_stops_batches(
             assert "task=" in log_context
 
             assert function in (
-                simulations._execute_simulation,
-                simulations._execute_reference_simulation,
+                workers.execute_simulation,
+                workers.execute_reference_simulation,
             )
 
-            true_for_reference_run = (
-                function is simulations._execute_reference_simulation
-            )
+            true_for_reference_run = function is workers.execute_reference_simulation
 
             future: WorkerFuture = Future()
 
@@ -123,6 +120,7 @@ def test_simulation_cancellation_kills_pool_and_stops_batches(
 
         @staticmethod
         def shutdown(wait: bool = True) -> None:
+            assert wait, "Normal pool shutdown must wait for its workers."
             calls.append("shutdown")
 
     def wait_then_cancel(
@@ -190,7 +188,7 @@ def test_simulation_cancellation_kills_pool_and_stops_batches(
     unfinished = [future for future in submitted if not future.done()]
 
     assert len(unfinished) == 1
-    assert instance.dataframes == {}
+    assert instance.result_cache.dataframes == {}
 
 
 def test_optimizer_cancellation_cleans_up_all_started_workers(
