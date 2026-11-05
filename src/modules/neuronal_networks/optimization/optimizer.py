@@ -47,7 +47,14 @@ from src.modules.neuronal_networks.optimization.search_worker import (
     optuna_worker,
 )
 from src.modules.runtime.cancellation import CancellationToken
-from src.modules.runtime.events import PipelineEvent
+from src.modules.runtime.events import EventType, PipelineEvent
+from src.modules.neuronal_networks.optimization.study_resume import (
+    find_matching_study,
+    validate_resume_config,
+)
+from src.modules.neuronal_networks.optimization.trial_budget import (
+    remaining_trial_counts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +83,7 @@ class NNOptimizer:
         log_queue: ProcessQueue[logging.LogRecord] | None = None,
         cancellation: CancellationToken | None = None,
         trained_autoencoder: Conv3dAutoencoder | None = None,
+        resume_study_name: str | None = None,
     ) -> None:
         validate_search_settings(
             search_space.max_num_layers,
@@ -140,22 +148,94 @@ class NNOptimizer:
 
         self.channel_result: ChannelOptimizationResult | None = None
 
+        if resume_study_name is not None and (
+                not isinstance(resume_study_name, str)
+                or len(resume_study_name) != 64
+                or any(
+            character not in "0123456789abcdef"
+            for character in resume_study_name
+        )
+        ):
+            raise ValueError(
+                "resume_study_name must be a 64-character lowercase hash."
+            )
+
         self.experiment_config = self._experiment_config()
-        self.fingerprint = canonical_hash(self.experiment_config)
+        self.current_fingerprint = canonical_hash(self.experiment_config)
+
+        if resume_study_name is None:
+            resume_study_name = find_matching_study(
+                optimization_directory=PATH_DATA / "optimization",
+                current_config=self.experiment_config,
+            )
+
+        self.resume_study_name = resume_study_name
+
+        self.fingerprint = (
+            self.current_fingerprint
+            if resume_study_name is None
+            else resume_study_name
+        )
         self.study_name = self.fingerprint
 
-        self.experiment_dir = PATH_DATA / "optimization" / self.fingerprint
-        self.experiment_dir.mkdir(parents=True, exist_ok=True)
+        self.experiment_dir = PATH_DATA / "optimization" / self.study_name
+        self.journal_path: Path = (
+                self.experiment_dir / "study.journal"
+        ).resolve()
 
-        self.journal_path: Path = (self.experiment_dir / "study.journal").resolve()
-        self.storage: JournalStorage = create_journal_storage(self.journal_path)
+        if resume_study_name is not None and not self.journal_path.is_file():
+            raise FileNotFoundError(
+                "Cannot resume study; journal does not exist: "
+                f"{self.journal_path}"
+            )
+
+        self.experiment_dir.mkdir(parents=True, exist_ok=True)
+        self.storage: JournalStorage = create_journal_storage(
+            self.journal_path
+        )
 
     def run(self) -> None:
         self.cancellation.raise_if_requested()
-        self._prepare_study()
+        study = self._prepare_study()
+
+        completed_count = len(
+            study.get_trials(
+                deepcopy=False,
+                states=(optuna.trial.TrialState.COMPLETE,),
+            )
+        )
+
+        target_trials = self.n_trials * self.num_workers
+
+        worker_trial_counts = remaining_trial_counts(
+            target_trials=target_trials,
+            completed_trials=completed_count,
+            num_workers=self.num_workers,
+        )
+
+        logger.info(
+            "Trial budget: channel=%s target=%d "
+            "completed=%d remaining=%d quotas=%s",
+            OUTPUT_NEURON_LIST[self.channel_index],
+            target_trials,
+            completed_count,
+            sum(worker_trial_counts),
+            worker_trial_counts,
+        )
+
+        credited_trials = min(completed_count, target_trials)
+
+        if credited_trials:
+            self.progress_queue.put(
+                PipelineEvent(
+                    event_type=EventType.PROGRESS,
+                    increment=credited_trials,
+                    outcome="trials_restored",
+                )
+            )
 
         self.cancellation.raise_if_requested()
-        self._run_workers()
+        self._run_workers(worker_trial_counts)
 
         self.cancellation.raise_if_requested()
 
@@ -291,6 +371,8 @@ class NNOptimizer:
             "src/modules/neuronal_networks/optimization/optimizer.py",
             "src/modules/neuronal_networks/optimization/objective.py",
             "src/modules/neuronal_networks/optimization/search_worker.py",
+            "src/modules/neuronal_networks/optimization/trial_budget.py",
+            "src/modules/neuronal_networks/optimization/study_resume.py",
         )
 
         map_shape: tuple[int, ...] = tuple(self.data.train.map_tensor.shape[1:-1])
@@ -349,26 +431,71 @@ class NNOptimizer:
             },
         }
 
-    def _prepare_study(self) -> None:
-        study: optuna.Study = optuna.create_study(
+    def _prepare_study(self) -> optuna.Study:
+        if self.resume_study_name is not None:
+            study = optuna.load_study(
+                study_name=self.study_name,
+                storage=self.storage,
+            )
+
+            recorded_fingerprint = study.user_attrs.get(
+                "experiment_fingerprint"
+            )
+
+            if recorded_fingerprint != self.study_name:
+                raise ValueError(
+                    "The requested study has an inconsistent identity."
+                )
+
+            validate_resume_config(
+                saved_config=study.user_attrs.get("experiment_config"),
+                saved_fingerprint=recorded_fingerprint,
+                current_config=self.experiment_config,
+            )
+
+            study.set_user_attr(
+                "last_resume_fingerprint",
+                self.current_fingerprint,
+            )
+            study.set_user_attr(
+                "last_resume_config",
+                self.experiment_config,
+            )
+
+            logger.info(
+                "Validated existing study for resume: "
+                "channel=%s study=%s journal=%s",
+                OUTPUT_NEURON_LIST[self.channel_index],
+                self.study_name,
+                self.journal_path,
+            )
+
+            return study
+
+        study = optuna.create_study(
             study_name=self.study_name,
             storage=self.storage,
             direction="minimize",
             load_if_exists=True,
         )
 
-        existing_fingerprint = study.user_attrs.get("experiment_fingerprint")
+        existing_fingerprint = study.user_attrs.get(
+            "experiment_fingerprint"
+        )
 
         if existing_fingerprint is None and study.trials:
             raise ValueError(
-                "The study in question contains trials without an experiment ID."
+                "The study in question contains trials "
+                "without an experiment ID."
             )
 
         if (
-            existing_fingerprint is not None
-            and existing_fingerprint != self.fingerprint
+                existing_fingerprint is not None
+                and existing_fingerprint != self.fingerprint
         ):
-            raise ValueError("The study forms part of a different experiment.")
+            raise ValueError(
+                "The study forms part of a different experiment."
+            )
 
         study.set_user_attr(
             "experiment_fingerprint",
@@ -379,7 +506,12 @@ class NNOptimizer:
             self.experiment_config,
         )
 
-    def _run_workers(self) -> None:
+        return study
+
+    def _run_workers(
+        self,
+        worker_trial_counts: tuple[int, ...],
+    ) -> None:
         processes: list[Process] = []
         deadline = (
             None
@@ -388,8 +520,11 @@ class NNOptimizer:
         )
 
         try:
-            for index in range(self.num_workers):
+            for index, trial_count in enumerate(worker_trial_counts):
                 self.cancellation.raise_if_requested()
+
+                if trial_count == 0:
+                    continue
 
                 process = Process(
                     target=optuna_worker,
@@ -399,7 +534,7 @@ class NNOptimizer:
                         "network_type": self.network_type,
                         "channel_index": self.channel_index,
                         "search_space": self.search_space,
-                        "n_trials": self.n_trials,
+                        "n_trials": trial_count,
                         "progress_queue": self.progress_queue,
                         "study_name": self.study_name,
                         "journal_path": self.journal_path,

@@ -270,7 +270,7 @@ def test_optimizer_cancellation_cleans_up_all_started_workers(
     )
 
     with pytest.raises(PipelineCancelledError):
-        optimizer._run_workers()
+        optimizer._run_workers((1, 1))
 
     assert len(created) == 2
     assert all(process.pid is not None for process in created)

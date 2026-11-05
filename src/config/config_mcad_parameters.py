@@ -2,7 +2,7 @@ D_CURRENT_DENSITY: tuple[float, float] = (-10, 0)
 Q_CURRENT_DENSITY: tuple[float, float] = (1, 25)
 # shaft_speed_norm = shaft_speed_rpm / base_speed_rpm
 # base_speed_rpm: no-load voltage-limit speed for ideal linear SVPWM
-SHAFT_SPEED_NORM: tuple[float, float] = (0.05, 1.0)
+SHAFT_SPEED_NORM: tuple[float, float] = (0.05, 0.9)
 REFERENCE_SPEED_RPM: float = 1000.0
 MAP_SIZE: tuple[int, int, int] = (5, 5, 5)
 

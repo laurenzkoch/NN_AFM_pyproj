@@ -42,6 +42,7 @@ class OptimizationPipline(MyPipeline):
         worker_timeout_seconds: float | None = None,
         autoencoders: AutoencoderCollection | None = None,
         ui_factory: PipelineUIFactory | None = None,
+        resume_studies: dict[str, str] | None = None,
     ) -> None:
         validate_search_settings(
             search_space.max_num_layers,
@@ -103,6 +104,7 @@ class OptimizationPipline(MyPipeline):
                 seed=seed,
                 worker_timeout_seconds=worker_timeout_seconds,
                 autoencoders=autoencoders,
+                resume_studies=dict(resume_studies or {}),
             )
 
         except BaseException:
@@ -150,7 +152,7 @@ class OptimizationPipline(MyPipeline):
             self.status_text = event.text
 
         elif event.event_type == EventType.PROGRESS:
-            if event.outcome == "trial_completed":
+            if event.outcome in ("trial_completed", "trials_restored"):
                 self.completed_trials += event.increment
 
         elif event.event_type in (

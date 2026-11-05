@@ -58,6 +58,7 @@ class OptimizationArguments(argparse.Namespace):
     worker_timeout: float | None
     network_type: NetworkType
     autoencoders: Path | None
+    resume_study: list[tuple[str, str]]
 
 
 class TrainingConfig(TypedDict):
@@ -86,6 +87,24 @@ def _search_metrics(
 
     return entries
 
+def _parse_resume_study(value: str) -> tuple[str, str]:
+    channel, separator, study_name = value.partition("=")
+
+    if not separator or channel not in OUTPUT_NEURON_LIST:
+        raise argparse.ArgumentTypeError(
+            "Expected CHANNEL=STUDY_HASH; valid channels: "
+            + ", ".join(OUTPUT_NEURON_LIST)
+        )
+
+    if len(study_name) != 64 or any(
+        character not in "0123456789abcdef"
+        for character in study_name
+    ):
+        raise argparse.ArgumentTypeError(
+            "STUDY_HASH must be a 64-character lowercase hash."
+        )
+
+    return channel, study_name
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -107,11 +126,30 @@ def main() -> None:
         default=None,
     )
 
+    parser.add_argument(
+        "--resume-study",
+        type=_parse_resume_study,
+        action="append",
+        default=[],
+        metavar="CHANNEL=STUDY_HASH",
+        help="Resume an existing study; repeat for additional channels.",
+    )
+
     args: OptimizationArguments = OptimizationArguments()
     parser.parse_args(namespace=args)
 
     if args.network_type == "CNN" and args.autoencoders is not None:
         parser.error("--autoencoders can only be combined with --network-type MLP.")
+
+    resume_studies: dict[str, str] = {}
+
+    for channel, study_name in args.resume_study:
+        if channel in resume_studies:
+            parser.error(
+                f"--resume-study specified twice for channel {channel}."
+            )
+
+        resume_studies[channel] = study_name
 
     configure_application_logging()
     logging.getLogger("fontTools.subset").setLevel(logging.WARNING)
@@ -179,6 +217,7 @@ def main() -> None:
         worker_timeout_seconds=args.worker_timeout,
         autoencoders=autoencoders,
         ui_factory=MyUserInterface,
+        resume_studies=resume_studies,
         **training,
     )
 
@@ -300,13 +339,11 @@ if __name__ == "__main__":
     main()
 
 # Referenzmodell, PowerShell:
-# python -m src.executable_files.main_optimize --csv "Results_EMagnetic_simulation_1_50_5_GenType-v2_30.10.2026_00-35-47_CET_a9299a86.csv" --network-type MLP --trials 100 --max_layer 5 --max_neuron 500 --unit_step 10
+# python -m src.executable_files.main_optimize --csv "Results_EMagnetic_simulation_1_30_5_GenType-v2_02.11.2026_17-59-24_CET_73cd35bf.csv" --network-type MLP --trials 100 --max_layer 5 --max_neuron 500 --unit_step 10
 
 # CNN-Sammlung, PowerShell:
-# python -m src.executable_files.main_optimize `
-#   --csv "DEINE_DATEI.csv" `
-#   --network-type CNN --trials 1000
-
+# python -m src.executable_files.main_optimize --csv "Results_EMagnetic_simulation_1_30_5_GenType-v2_02.11.2026_17-59-24_CET_73cd35bf.csv" --network-type CNN --trials 100 --max_layer 3 --max_neuron 64 --unit_step 2
+#
+#
 # Kombimodell
-# python -m src.executable_files.main_optimize --csv "DATEI.csv" --network-type
-# MLP --autoencoders "VOLLSTAENDIGER_PFAD\AutoencoderCollection.pt"
+# python -m src.executable_files.main_optimize --csv "Results_EMagnetic_simulation_1_20_5_GenType-v2_02.11.2026_17-59-24_CET_73cd35bf.csv" --network-type MLP --trials 100 --max_layer 5 --max_neuron 500 --unit_step 10 --autoencoders "D:\Python_Projects\NN_AFM_pyproj\data\trained_nn\AutoencoderCollections\20261104_152808_5d03efce\AutoencoderCollection.pt"

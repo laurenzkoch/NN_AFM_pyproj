@@ -50,6 +50,7 @@ class OptimizationService:
     seed: int
     worker_timeout_seconds: float | None = None
     autoencoders: AutoencoderCollection | None = None
+    resume_studies: dict[str, str] = field(default_factory=dict)
 
     optimization_results: tuple[ChannelOptimizationResult, ...] = field(
         default=(),
@@ -104,6 +105,7 @@ class OptimizationService:
                 log_queue=self.log_queue,
                 cancellation=self.cancellation,
                 trained_autoencoder=channel_autoencoder,
+                resume_study_name=self.resume_studies.get(channel_name),
             )
             optimizer.run()
 
