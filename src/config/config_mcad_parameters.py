@@ -9,7 +9,7 @@ MAP_SIZE: tuple[int, int, int] = (5, 5, 5)
 POLE_NUMBER: int = 12
 SLOT_NUMBER: int = 18
 AIRGAP: tuple[float, float] = (0.75, 3)
-STATOR_BORE: tuple[float, float] = (11, 100)
+STATOR_BORE: tuple[float, float] = (50, 120)
 
 GEO_PARAMETERS_MIN_MAX_DICT = {
     "Airgap": AIRGAP,
@@ -18,7 +18,7 @@ GEO_PARAMETERS_MIN_MAX_DICT = {
 
 LAMBDA_BOUNDS: dict[str, tuple[float, float]] = {
     # radial:       lambda_1 = D_Si / D_Sa
-    "lambda_1": (0.2, 0.8),
+    "lambda_1": (0.4, 0.8),
     # tangential:   lambda_2 = beta_PM / beta_p = 2 * Magnet_Arc_[ED] / 360
     "lambda_2": (0.5, 0.9),
     # axial:        lambda_3 = g / l_PM
@@ -26,7 +26,7 @@ LAMBDA_BOUNDS: dict[str, tuple[float, float]] = {
     # tangential:   lambda_4 = b_S / tau_s = s*b_S / pi*D_Si
     "lambda_4": (0.3, 0.7),
     # axial:        lambda_5 = b_S / d_S
-    "lambda_5": (0.1, 1.0),
+    "lambda_5": (0.25, 1.0),
     # radial:       lambda_6 = h_PM / (D_Sa - D_Si)/2
     "lambda_6": (0.6, 1.0),
     # radial:       lambda_7 = d_emb / ((D_Sa - D_Si)/2 - h_PM)

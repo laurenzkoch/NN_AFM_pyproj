@@ -73,7 +73,7 @@ def _search_metrics(
 ) -> list[JSONValue]:
     entries: list[JSONValue] = []
     for result in pipeline.optimization_results:
-        layers: list[JSONValue] = [value for value in result.architecture.layers]
+        layers: list[int] = [value for value in result.architecture.layers]
 
         entry: dict[str, JSONValue] = {
             "channel": OUTPUT_NEURON_LIST[result.channel_index],
@@ -192,9 +192,9 @@ def main() -> None:
 
     training: TrainingConfig = {
         "learning_rate": 1e-3,
-        "weight_decay": 1e-3,
+        "weight_decay": 0,
         "num_epochs": 2000,
-        "patience": 100,
+        "patience": 50,
     }
 
     search_space: NetworkSearchSpace = NetworkSearchSpace(
@@ -339,11 +339,10 @@ if __name__ == "__main__":
     main()
 
 # Referenzmodell, PowerShell:
-# python -m src.executable_files.main_optimize --csv "Results_EMagnetic_simulation_1_30_5_GenType-v2_02.11.2026_17-59-24_CET_73cd35bf.csv" --network-type MLP --trials 100 --max_layer 5 --max_neuron 500 --unit_step 10
+# python -m src.executable_files.main_optimize --csv "Results_EMagnetic_simulation_1_100_5_GenType-v2_06.11.2026_19-30-03_CET_3aede4ab.csv" --network-type MLP --trials 50 --max_layer 5 --max_neuron 500 --unit_step 10
 
 # CNN-Sammlung, PowerShell:
 # python -m src.executable_files.main_optimize --csv "Results_EMagnetic_simulation_1_30_5_GenType-v2_02.11.2026_17-59-24_CET_73cd35bf.csv" --network-type CNN --trials 100 --max_layer 3 --max_neuron 64 --unit_step 2
-#
-#
+
 # Kombimodell
-# python -m src.executable_files.main_optimize --csv "Results_EMagnetic_simulation_1_20_5_GenType-v2_02.11.2026_17-59-24_CET_73cd35bf.csv" --network-type MLP --trials 100 --max_layer 5 --max_neuron 500 --unit_step 10 --autoencoders "D:\Python_Projects\NN_AFM_pyproj\data\trained_nn\AutoencoderCollections\20261104_152808_5d03efce\AutoencoderCollection.pt"
+# python -m src.executable_files.main_optimize --csv "Results_EMagnetic_simulation_1_30_5_GenType-v2_02.11.2026_17-59-24_CET_73cd35bf.csv" --network-type MLP --trials 100 --max_layer 5 --max_neuron 500 --unit_step 10 --autoencoders "D:\Python_Projects\NN_AFM_pyproj\data\trained_nn\AutoencoderCollections\20261105_152630_12528f9d\AutoencoderCollection.pt"

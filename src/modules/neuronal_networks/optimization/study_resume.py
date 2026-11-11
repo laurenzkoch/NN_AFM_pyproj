@@ -90,10 +90,21 @@ def find_matching_study(
         ):
             continue
 
-        study = optuna.load_study(
-            study_name=study_name,
-            storage=create_journal_storage(journal_path),
-        )
+        storage = create_journal_storage(journal_path)
+
+        try:
+            study = optuna.load_study(
+                study_name=study_name,
+                storage=storage,
+            )
+        except KeyError:
+            logger.warning(
+                "Skipped journal: expected study not found; "
+                "study=%s journal=%s",
+                study_name,
+                journal_path,
+            )
+            continue
 
         if study.directions != [optuna.study.StudyDirection.MINIMIZE]:
             continue
